@@ -1,24 +1,4 @@
----
-title: "Overlap_truncation analysis"
-author: "Banguket Nina(2366065)"
-date: "2025-12-04"
-output:
-  pdf_document:
-    toc: false
-fontsize: 11pt
-geometry: margin=1in
-editor_options: 
-  markdown: 
-    wrap: 72
----
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-```{r include=FALSE}
-setwd("~/Desktop/Thesis/Benchmarking/Overlap_analysis")
-```
 
 ```{r include=FALSE}
 library(rtracklayer)
@@ -47,10 +27,6 @@ edta <- read.csv("~/Desktop/Thesis/Benchmarking/benchmarking_EDA/droso_edta_stan
 
 
 # Overlap Analysis
-
-EDTA identified 1767 chromosomes(seqnames) and Earl Grey 1402
-chromosomes. Both pipelines identified 1345 chromosomes in common,
-resulting in 422 identified by EDTA only and 57 by EarlGrey only.
 
 ```{r include=FALSE}
 length(unique(edta$seqnames))
@@ -103,9 +79,6 @@ kable(
 
 ```
 
-The analysis is based on all the chromosomes identified by both
-pipelines. In a first instance the most populated chromosome identified
-by each pipeline will be explored.
 
 ```{r include=FALSE}
 # EDTA: TE count per chromosome
@@ -156,10 +129,7 @@ earl_top_name
 
 ```
 
-Both EDTA and Earl Grey identified the same chromosome as being the most
-populated, suggesting that both pipelines capture the most dense region
-of the genome in the same way. On this chromosome, EDTA identified 6283
-TEs while Earl Grey identified 7768 TEs. The overlap analysis follows:
+
 
 ### Most populated Chromosome
 
@@ -231,13 +201,6 @@ overlap_df_chr <- tibble(
 overlap_df_chr
 ```
 
-Given that zooming into the entire genome is not possible due to the
-size, for some parts of this analysis, zoomed in figures of sections of
-the chromosome will be provided while for other parts only
-numbers(mostly percentages) will be provided. The overlap analysis
-revealed that for chromosome AE013599.5 8353 TEs were found to overlap
-between EDTA and Earl Grey. These overlaps contain both 100% and partial
-overlaps.
 
 ```{r echo=FALSE}
 ggplot(overlap_df_chr) +
@@ -347,28 +310,9 @@ plot_chr_overlap(target_chr) +
 
 ```
 
-The zoomed-in comparison of EDTA and Earl Grey annotations on chromosome
-AE013599.5 shows that both pipelines detect transposable elements within
-the same genomic intervals, demonstrating strong agreement about where
-TE activity occurs in this region. However, the boundaries and lengths
-of their predictions differ.
 
-EDTA produces several shorter, more fragmented annotations, reflecting
-its structural detection strategy, which identifies cleanly delimited
-elements but tends to split copies when termini are disrupted or when
-partial domains are present.
 
-In contrast, Earl Grey frequently reports longer, more continuous
-intervals, consistent with its homology-based expansion of TE families,
-which captures broader footprints that may include truncated, degraded,
-or fused remnants of older insertions. The pipelines therefore agree on
-the location of TE-rich locations but differ in how they construct
-element boundaries.
 
-This regional pattern shows the genome-wide trends observed in TE length
-distributions, truncation patterns, and identity variation, highlighting
-how structural and homology-driven methods provide complementary but not
-identical representations of TE content.
 
 ### Summary Statistics for the most populated Chromosome
 
@@ -505,33 +449,6 @@ kable(coverage_pct_tbl,
 
 ```
 
-Across this chromosome, EDTA reported fewer TEs than Earl Grey and
-produced consistently shorter annotations. EDTA exhibited a lower mean
-TE length, a smaller maximum TE length, and reduced total TE base pair
-coverage compared with Earl Grey. The percentage of the chromosome
-annotated as TE was also lower for EDTA. These combined metrics indicate
-that Earl Grey detects a greater quantity of TE-derived sequence and
-annotates longer intervals overall, whereas EDTA captures a smaller set
-of typically shorter elements(possibly more intact TEs due to structural
-identification). This suggests that Earl Grey has greater sensitivity in
-terms of completeness of the TEs while EDTA tends to identify more
-intact and new(young) TEs.
-
-EDTA is more conservative and structurally precise, whereas Earl Grey is
-more inclusive and sensitive. They complement each other rather than
-outperform each other.
-
-***Jaccard Index***
-
-The similarity between EDTA and Earl Grey TE annotations on this
-chromosome was quantified using the Jaccard index, a measure of the
-overlap between two sets. For this chromosome, the two pipelines
-exhibited a Jaccard index of 0.69, indicating a high degree of shared TE
-coverage. This value shows that approximately 69 percent of the combined
-TE-annotated sequence is detected by both methods, reflecting
-substantial positional agreement despite clear differences in TE
-lengths, boundaries, and the number of elements reported by each
-pipeline.
 
 ```{r most_pop_chr_overlap, include=FALSE}
 
@@ -580,7 +497,6 @@ head(overlap_df)
 ***TEs with exact match ie the same TE was identified by both Earl Grey
 and EDTA*** 
 
-318 TEs were found to overlap completely.
 
 ```{r include=FALSE}
 exact_matches <- overlap_df %>%
@@ -649,8 +565,6 @@ exact_matches_class <- exact_matches %>%
 
 ```
 
-The following table summarises the agreement level of the exact match TE
-classification by EDTA and Earl Grey.
 
 ```{r echo=FALSE}
 agreement_summary <- tibble(
@@ -675,18 +589,7 @@ kable(
 
 ```
 
-Across the 447 exact positional matches between EDTA and Earl Grey, most
-transposable elements were placed into the same broad categories by both
-pipelines. About 91$%$ of these elements were assigned to the same TE
-class, showing strong agreement at the highest level of classification.
-Agreement was slightly lower at the order level, with around 89$%$ of
-matched elements receiving the same order label. However, at the
-superfamily level, agreement dropped to 66$%$, meaning that almost half
-of the elements were given different or more specific superfamily names
-by the two pipelines. There are 850 exact matches. This pattern shows
-that the two methods agree well on broad classifications, but diverge
-more as classifications become more detailed, likely because each
-pipeline handles ambiguous, partial, or degraded elements differently.
+
 
 ```{r include=FALSE}
 # adding other attributes for further comparison
@@ -765,12 +668,6 @@ ggplot(width_long, aes(x = width, fill = pipeline)) +
 
 ```
 
-Only one color appears as the width in both pipelines are exact matches.
-The TE width distribution shows that exact-match elements, fall between
-100–500 bp, and the counts rapidly declining as width increases. A small
-number of longer elements extend up to several kilobases, producing a
-long right-skewed tail characteristic of mixed fragmented and
-full-length TEs.
 
 ```{r echo=FALSE}
 score_long <- perfect_match %>%
@@ -805,11 +702,6 @@ ggplot(perfect_match) +
 
 ```
 
-The score distribution for exact matches is very right-skewed, with most
-TE scores being low and only a few very high. Earl Grey and EDTA show
-almost the same curve, meaning they give similar scores when they find
-exact matches. Only a small number of TEs receive high scores, so strong
-exact matches are uncommon in both pipelines.
 
 ```{r echo=FALSE}
 combined <- perfect_match %>%
@@ -836,21 +728,7 @@ ggplot(combined, aes(x = value, fill = metric)) +
 
 ```
 
-The plot reveals that the scores for both pipeline:
 
-\begin{itemize}
-\item Earl Grey’s overlapping TEs exhibit low divergence (mostly 0 to 0.3), indicating they are highly similar and likely represent relatively young insertions.
-\item EDTA’s homology identity values span moderately high similarity (approximately 0.65 to 0.95), capturing both intact and partially degraded elements.
-\item EDTA’s LTR structural identity is concentrated near 1.0, demonstrating that the subset of elements with recognized LTR structure are highly intact.
-\end{itemize}
-
-Overall, these distributions indicate that the TEs for which both
-pipelines agree perfectly in genomic location tend to be young and
-well-preserved elements.
-
-Both EDTA and Earl Grey are highly consistent when TE structure and
-similarity are largely intact, whereas older or more fragmented elements
-show reduced agreement between the pipelines.
 
 ```{r}
 chr_summary_main <- tibble(
@@ -871,10 +749,6 @@ kable(
 ```
 
 
-
-## Overlap analysis for Chromosmes common to both EDTA and Earl Grey
-
-1388 chromosmes were identified by both EDTA and Earl Grey.
 
 ```{r helper function, include=FALSE}
 # helper function
@@ -944,8 +818,6 @@ kable(chr_overlap_summary,
   kable_styling(full_width = FALSE)
 ```
 
-On average, Earl Grey identified more TEs than EDTA, bp coverage was
-higher for EARL Grey, longer mean length as well.
 
 ```{r Jaccard distribution, echo=FALSE}
 
@@ -959,10 +831,6 @@ ggplot(chr_overlap_summary, aes(x = Jaccard)) +
 
 ```
 
-Out of the 1345 common chromosomes, 1156 of them had a Jaccard index
-greater than $0.5$ and 1077 had an index greater then $0.6$ suggesting a
-strong agreement between the results produced by both pipelines in most
-chromosomes.
 
 ```{r include=FALSE}
 sum(chr_overlap_summary$Jaccard > 0.6, na.rm = TRUE)
@@ -995,11 +863,7 @@ ggplot(counts_long, aes(x = Count, color = Pipeline, fill = Pipeline)) +
 
 ```
 
-The above plot suggests that most chromosomes contain little TEs
-identified(higher peaks), which are tiny contigs. This corresponds to
-what I have found about the euchromatic and heterochromatic regions in
-the genome. The flatter line with higher counts correspond to the
-euchromatic regions.
+
 
 ```{r bp coverage, echo=FALSE}
 cov_long <- chr_overlap_summary %>%
@@ -1023,14 +887,7 @@ ggplot(cov_long, aes(x = Coverage_bp, color = Pipeline, fill = Pipeline)) +
 
 ```
 
-The distribution of TE basepair coverage per scaffold shows a dominant
-peak near 1 kb for both pipelines, reflecting thousands of small
-scaffolds with minimal TE content. However, Earl Grey consistently
-exhibits a heavier right tail, indicating greater TE recovery on large
-chromosomes. This is consistent with its homology-based detection of
-fragmented or degraded TE sequences that EDTA frequently excludes. The
-extreme right tail corresponds to the major chromosomes, which contain
-extensive TE-rich heterochromatin.
+
 
 ```{r mean length, echo=FALSE}
 len_long <- chr_overlap_summary %>%
@@ -1066,9 +923,7 @@ ggplot(len_long, aes(x = Mean_Length, color = Pipeline, fill = Pipeline)) +
 
 ```
 
-EDTA tends to annotate shorter and newer TE fragments.Earl Grey produces
-systematically longer TE calls, especially on larger scaffolds and
-chromosomes.
+
 
 ```{r overall overlap, echo=FALSE}
 ggplot(chr_overlap_summary, aes(x = Overlap_bp)) +
@@ -1083,13 +938,7 @@ ggplot(chr_overlap_summary, aes(x = Overlap_bp)) +
 
 ```
 
-Most scaffolds exhibit modest overlapping TE coverage, reflecting short,
-isolated TE fragments that both pipelines detect consistently. A smaller
-subset of longer scaffolds and full chromosomes contributes to the
-extended right tail, reaching up to about 1 Mb of overlapping TE
-sequence. This indicates substantial agreement between EDTA and EarlGrey
-in TE rich genomic regions, particularly within heterochromatic blocks
-and major chromosome arms.
+
 
 ```{r include=FALSE}
 
@@ -1209,11 +1058,7 @@ kappa_super
 
 ```
 
-All kappa statistics were highly significant (p $<$ 0.001), reflecting
-the large number of paired annotations (n = 1664). EDTA and Earl Grey
-show strong agreement at the order level (K = 0.794), moderate agreement
-at the superfamily level (K = 0.424), and fair agreement at the class
-level (K = 0.367).
+
 
 ```{r include=FALSE}
 exact_super <- exact_all %>%
@@ -1590,14 +1435,7 @@ diversity_genomewide
 
 ```
 
-Earl Grey consistently exhibited higher TE richness and Shannon
-diversity than EDTA across the genome. This reflects its homology based
-sensitivity, which annotates both intact and degraded copies. EDTA
-produced a more even distribution of TE categories but recovered fewer
-TE families overall, consistent with its preference for structurally
-intact elements. The major chromosome arms (2L, 2R, 3L, 3R) showed the
-highest diversity, whereas the X chromosome displayed the lowest TE
-diversity, a known feature of D. melanogaster TE biology.
+
 
 #### Correlation Analysis
 
@@ -1620,37 +1458,6 @@ correlation_summary <- tibble(
 correlation_summary
 
 ```
-
-EDTA scores were strongly correlated with TE length, consistent with its
-reliance on structural completeness. Earl Grey scores showed only a
-moderate correlation with TE length, reflecting the homologybased
-recovery of older and partially degraded elements. The correlation
-between EDTA and Earl Grey scores for exact matches was moderate,
-showing that the pipelines capture different biological signals. Age
-metrics (EDTA identity vs 1 minus EG KIMURA80 divergence) showed
-positive but moderate correlation, indicating consistent detection of
-young intact TEs, but divergent handling of older fragments.
-
-Overall, EDTA and Earl Grey show substantial positional agreement across
-the genome and strong concordance at the broad TE class level. Earl Grey
-detects a greater diversity of TE families and annotates more degraded
-and nested elements, resulting in higher TE richness and Shannon
-diversity. EDTA is more conservative, identifying fewer but more
-structurally intact TEs, and producing higher agreement for younger
-elements. Correlation analyses reveal that EDTA's scoring strongly
-reflects structural completeness, whereas Earl Grey captures broader
-evolutionary diversity. Thus, the two pipelines provide complementary
-perspectives on the TE landscape of D. melanogaster.
-
-For accurate classification of intact and structurally defined TEs, EDTA
-provides high precision and consistent annotation. For broad recovery of
-TE-derived sequence, including older degraded elements and nested
-insertions, Earl Grey offers superior sensitivity and diversity
-representation. In practice, a combined approach yields the most
-complete reconstruction of the TE landscape, with EDTA providing
-structural certainty and Earl Grey offering comprehensive homology-based
-coverage.
-
 
 
 
