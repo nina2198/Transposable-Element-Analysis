@@ -1,24 +1,5 @@
----
-title: "Transposable Elements: Types, Characterization, Identification, and Annotation"
-author: "Banguket Nina(2366065)"
-date: "2025-10-23"
-output:
-  pdf_document:
-    toc: false
-fontsize: 11pt
-geometry: margin=1in
-editor_options: 
-  markdown: 
-    wrap: 72
----
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
 
-```{r}
-setwd("~/Desktop/Thesis/Benchmarking")
-```
 
 
 ```{r include=FALSE}
