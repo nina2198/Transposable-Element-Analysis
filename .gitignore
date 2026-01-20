@@ -47,3 +47,33 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# -----------------------
+# Raw data (never commit)
+# -----------------------
+data/raw/
+data/raw/**
+
+# Large derived outputs
+results/logs/
+results/tmp/
+
+# Tool-specific working directories
+**/EDTA_raw/
+**/EDTA_output/
+**/earl_grey_output/
+
+# Genome and read files
+*.fasta
+*.fa
+*.fna
+*.fastq
+*.fq
+*.fastq.gz
+*.csv
+
+# R temporary files
+.Rhistory
+.RData
+.Rproj.user/
+
