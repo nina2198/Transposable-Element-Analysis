@@ -1,17 +1,4 @@
----
-title: "mansoni_vs_mediterranea"
-author: "Banguket Nina(2366065)"
-date: "2026-01-16"
-output: html_document
----
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-```{r include=FALSE}
-setwd("~/Desktop/Thesis/final_analysis")
-```
 
 ```{r include=FALSE}
 library(rtracklayer)
@@ -25,6 +12,11 @@ library(patchwork)
 library(stringr)
 library(tibble)
 ```
+
+```{r}
+#Filtering and harmonisation for EG output on s_mansoni and s_mediterranea
+```
+
 
 ```{r data import, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
 #Importing S. mansoni
@@ -41,7 +33,7 @@ medit_data <- import("/Users/ninabanguket/Desktop/Thesis/final_analysis/EarlGrey
 mansoni_file <- "/Users/ninabanguket/Desktop/Thesis/final_analysis/EarlGrey/schistosomaMansoni.filteredRepeats.gff"
 medit_file <- "/Users/ninabanguket/Desktop/Thesis/final_analysis/EarlGrey/schmidteaMediterranea.filteredRepeats.gff"
 
-# Read as plain tab-delimited tables
+
 mansoni_data <- read.table(
   mansoni_file,
   sep = "\t",
@@ -60,7 +52,7 @@ medit_data <- read.table(
   comment.char = ""
 )
 
-# Assign standard GFF column names (first 9 columns only)
+# Assign standard GFF column names 
 colnames(mansoni_data)[1:9] <- c(
   "seqid", "source", "type", "start", "end",
   "score", "strand", "phase", "attributes"
@@ -186,18 +178,7 @@ write.csv(
 
 
 ```{r eg_standard_single_order, message=FALSE, warning=FALSE}
-# separation of the type column and reclassification where needed
-
-# ============================================================
-# Earl Grey (EG) only: standardise multi-level `type` into
-# class/order/superfamily/family with a single `order` column.
-# - Keeps original `type`
-# - Adds: eg_prefix, eg_suffix, class_broad, class_I_II, order,
-#         superfamily, family, mechanism, reclassified
-# - Uses attributes as FAMILY-only fallback (NAME=... by default)
-# - Special-case: "I-Jockey" is kept as a single LINE clade label
-# - Helitron mechanism flag based on inferred order
-# ============================================================
+# Standardisation
 
 `%||%` <- function(x, y) ifelse(is.na(x) | x == "", y, x)
 
@@ -220,7 +201,7 @@ split_type <- function(df) {
 }
 
 # Generic: suffix -> superfamily/family
-# IMPORTANT: do NOT split I-Jockey into family (both are LINE clades)
+# mainitain I-Jockey 
 infer_sf_fam <- function(suffix) {
   if (is.na(suffix) || suffix == "") return(list(sf = NA_character_, fam = NA_character_))
 
@@ -290,7 +271,7 @@ canonicalise_vec <- function(prefix_vec, suffix_vec, sf_raw_vec, fam_raw_vec) {
   )
 }
 
-# Infer order from prefix + superfamily (single order column)
+# Infer order from prefix + superfamily 
 infer_order <- function(prefix, superfamily) {
   if (prefix == "Unknown") return("Unknown")
 
@@ -347,7 +328,7 @@ standardise_eg <- function(df, family_attr_key = "NAME") {
   sf_fam1 <- canonicalise_vec(df$eg_prefix, df$eg_suffix, df$sf_raw, df$fam_raw)
   df <- bind_cols(df, sf_fam1)
 
-  # FAMILY fallback from attributes (limited to NAME=... by default)
+  # FAMILY fallback from attributes
   fam_from_attr <- get_attr_value(df$attributes, family_attr_key)
 
   df <- df %>%
@@ -377,7 +358,7 @@ standardise_eg <- function(df, family_attr_key = "NAME") {
     ) %>%
     select(-sf_raw, -fam_raw)
 
-  # Repeat Unknown for Unknown type rows across taxonomy fields
+  # Harmonisng unkwon fields to Unknown
   df %>%
     mutate(
       class_broad = if_else(type == "Unknown", "Unknown", class_broad),
@@ -396,7 +377,7 @@ medit_te   <- standardise_eg(medit_te)
 
 
 ```{r eg_standard_single_order, message=FALSE, warning=FALSE}
-# checks
+#SC
 medit_te %>%
   filter(type == "LINE/Penelope") %>%
   select(type, eg_prefix, order, superfamily, family, reclassified) %>%
