@@ -23,27 +23,6 @@ droso_earlG_TEonly <- read.csv("~/Desktop/Thesis/Benchmarking/benchmarking_EDA/d
 ```
 
 
-After filtering, EDTA dataset retained 12 unique TE types while Earl Grey has 18 unique TE types.
-
-## Data Exploration
-
-From here were are working only with the filtered  and standardised dataset.
-
-### Comparing the average width and score
-The score represented in both tables is the Smith-Waterman score. 
-Smith-Waterman algorithm :It’s a local alignment algorithm, meaning it finds
-the best matching subsequences between two sequences (rather than
-forcing alignment across their entire lengths).The genomic sequence
-fragment (a candidate transposable element) is aligned with a known TE
-consensus/reference from the repeat library. The algorithm computes a
-dynamic-programming matrix of match/mismatch/gap scores ussing affine gap scoring metthod and finds the highest‐scoring local alignment. A higher average score suggests better local alignment performed by pipeline.
-Better local alignment ensures that genomic fragments are accurately matched to the correct TE family, reducing misclassification and false positives. It also improves the reliability of TE boundaries and overall annotation quality.
-
-
-
-The width of a transposable element represents the length of its annotated genomic interval.It provides a simple indication of whether most TEs in the dataset are intact (longer widths) or truncated/fragmented (shorter widths). The average TE width therefore offers a simple way to compare pipelines, with larger mean widths suggesting that a tool identifies more complete TE structures.
-
-
 ```{r echo=FALSE}
 # Compute summary values
 avg_width_edta   <- round(mean(droso_edta_TEonly$width,  na.rm = TRUE), 2)
@@ -66,11 +45,6 @@ knitr::kable(
 )
 
 ```
-
-The results from the table suggest that EDTA produces more intact TEs with better scores.
-
-### TE Classificaiton Level summaries
-
 
 ```{r EDTA classification, include=FALSE}
 edta2 <- droso_edta_TEonly 
@@ -349,8 +323,6 @@ ggplot(edta2, aes(x = width)) +
 
 ```
 
-The plot is extremely right skewed with most TEs with width ~1000bp
-Log-transformation due to skewed nature of distribution
 
 ```{r echo=FALSE}
 ggplot(edta2, aes(x = width)) +
@@ -365,8 +337,6 @@ ggplot(edta2, aes(x = width)) +
 
 ```
 
-The TE width distribution reveals clear biological structure, with distinct peaks around 150–300 bp and 400–2000 bp.
-Longer elements such as LTRs and full-length LINEs form a tapering tail extending up to ~10 kb.
 
 ```{r echo=FALSE}
 ggplot(edta2, aes(x = width, fill = class)) +
@@ -396,8 +366,6 @@ ggplot(edta2, aes(x = width, fill = class, colour = class)) +
 ```
 
 
-Retrotransposons span a broad width range, with most elements between ~150 bp and several kilobases, reflecting the diversity of LINEs and LTRs.
-DNA transposons are concentrated at shorter lengths (~150–400 bp), forming a sharp peak consistent with compact TIR-based elements, while Unknowns appear only at low frequency across the range.
 
 ```{r echo=FALSE}
 ggplot(edta2, aes(x = order, y = width, fill = order)) +
@@ -413,8 +381,6 @@ ggplot(edta2, aes(x = order, y = width, fill = order)) +
 
 ```
 
-LINE and LTR elements show broad and highly skewed length distributions, with many truncated copies and a long tail of full-length elements extending into the kilobase range.
-DNA transposons and MITEs are tightly clustered at shorter lengths (typically 100–500 bp), reflecting their compact TIR-based structure, while DNAnona occupies an intermediate range with moderate variability.
 
 **Earl Grey**
 ```{r echo=FALSE}
@@ -441,9 +407,6 @@ ggplot(earl2, aes(x = width)) +
   theme_bw()
 
 ```
-
-The Earl Grey width distribution shows a broad, smooth peak spanning roughly 50–3000 bp, indicating a mixture of short DNA transposons and longer LTR/LINE elements.
-The long right tail up to ~10–20 kb reflects full-length retrotransposons, while the leftmost bins capture very short fragments and potential truncated elements.
 
 
 ```{r}
@@ -528,7 +491,6 @@ p_edta_den / p_earl_den
 ```
 
 ```{r}
-library(patchwork)
 
 xmin <- max(min(c(edta2$width, earl2$width), na.rm = TRUE), 1)
 xmax <- max(c(edta2$width, earl2$width), na.rm = TRUE)
@@ -661,22 +623,12 @@ ggplot(edta2, aes(x = order, y = width, fill = order)) +
 
 
 
-LINE and LTR elements exhibit broad and highly variable length distributions, with long tails extending into the kilobase range, suggesting frequent truncation and the presence of full-length retrotransposons.
-DNA transposons show a narrower and shorter size range, while the ‘Unknown’ group spans mixed lengths, likely representing fragments or unclassified remnants.
 
 
 ### TE Age analysis
 
 
 TE age can be inferred from the degree of sequence similarity between individual copies and their corresponding consensus sequence. Each TE family is represented by such a consensus, which reflects an approximation of the ancestral state of that element. When a TE copy inserts into the genome, it typically matches the consensus very closely because it has undergone little to no mutational change at the moment of insertion. As time passes, substitutions and small-scale mutations accumulate independently within each copy. This gradual accumulation of mutations reduces sequence identity relative to the consensus, making identity a practical proxy for TE age. In this context, high identity indicates recently inserted, young TE copies, whereas lower identity suggests older elements that have persisted in the genome for much longer.
-
-Structural and homology-based TE detection methods capture different parts of this age spectrum. Structure-based methods, such as those used within EDTA, recognise TEs by their architectural signatures—features like flanking long terminal repeats, terminal inverted repeats, characteristic motifs, or target site duplications. These structural hallmarks decay over evolutionary time, meaning that only intact or nearly intact TEs will still possess the features required for structural detection. As a result, structure-based predictions predominantly identify the youngest and most complete elements, which are expected to have high identity values because they have accumulated relatively few mutations since insertion. These younger intact copies preserve clearer LTR boundaries, characteristic motifs, and well-defined target site duplications, making them detectable by structural algorithms.
-
-In contrast, homology-based TE identification does not rely on preserved structural signatures. Instead, it detects TEs by sequence similarity to known TE families, enabling recognition of both intact and heavily degraded copies. This means homology-based searches recover not only full-length elements but also the vast population of fragmented, truncated, or otherwise eroded TE remnants that constitute the majority of TE-derived genomic content. Because these degraded elements have lost their original structural features through mutation, deletion, and recombination, they cannot be detected de novo and only become visible during the homology-based genome-wide masking stage. Consequently, homology-based identification spans a far broader age range and dominates the pool of older, low-identity TE copies.
-
-The LTR retrotransposon content of the dataset illustrates this relationship clearly. Only a very small minority of LTR retrotransposons remain sufficiently intact to be recovered through structure-based detection. Most LTR-derived sequences persist as incomplete internal regions, truncated fragments, or solo-LTRs produced by recombination events that excise internal domains. These sequences lack the paired LTRs or other architectural features required for structural recognition. As a result, although EDTA’s structural module generates the initial set of full-length LTR exemplars, the vast majority of LTR annotations ultimately arise from homology-based expansion of those exemplars during genome masking. This explains why most LTR retrotransposons in the final dataset were identified through homology rather than de novo structural discovery, despite the initial library being constructed from structural detections.
-
-Taken together, these considerations show why TE identity in EDTA and KIMURA80 divergence in Earl Grey serve as meaningful age indicators, and why structural versus homology-based detection produces characteristic patterns in age distributions.Young, intact TEs display high identity or low divergence, and are typically associated with structural detection, whereas older, degraded copies form the broader, lower-identity or higher-divergence distribution that overwhelmingly reflects homology-based recovery.
 
 ```{r}
 edta_homol <- edta2 %>% 
@@ -691,9 +643,6 @@ edta_struct <- edta2 %>%
 table(edta2$method)
 
 ```
-
-
-PS: I am yet to differentiate homology-based and structure-based in Earl Grey
 
 **Part 1: Homology-Based Identity**
 
@@ -833,9 +782,6 @@ ggplot(combined_age, aes(x = type, y = value, fill = type)) +
 ```
 
 **Earl Grey**
-
-KIMURA80 is a divergence-based age estimate that measures how many mutations have accumulated in a TE copy relative to its consensus sequence.
-Low KIMURA80 values indicate recently inserted, young elements, whereas high values reflect older, more degraded TE copies that have experienced extensive substitutions over evolutionary time.
 
 ```{r echo=FALSE}
 ggplot(earl2, aes(x = KIMURA80)) +
@@ -1010,7 +956,7 @@ ggplot(edta_method_order, aes(x = method, y = n, fill = order)) +
 
 ```
 
-### Genome Coverage Analyis
+### Genome Coverage Analysis
 
 ```{r echo=FALSE}
 edta_total_bp <- sum(edta2$width, na.rm = TRUE)
@@ -1147,118 +1093,4 @@ ggplot(edta_cov_class, aes(x = class, y = total_bp, fill = class)) +
 
 ```
 
-
-### Score Analysis
-
-TE scores reflect local alignment quality between each TE copy and its consensus, derived from the Smith–Waterman algorithm.
-
-
-High-scoring elements produce long, uninterrupted matches and are typically intact, recently inserted, or well-preserved copies.
-
-
-Low-scoring elements accumulate mismatches, gaps, and truncations, reflecting older or heavily degraded TE fragments.
-
-
-The strongly right-skewed score distributions arise because most genomic TE copies are ancient remnants, while only a few remain intact enough to achieve high scores.
-
-
-TE score therefore serves as a proxy for TE completeness, structural integrity, and relative evolutionary age, complementing identity and divergence metrics.
-
-
-
-```{r echo=FALSE}
-
-ggplot(edta2, aes(x = score)) +
-  geom_histogram(bins = 50, fill = "steelblue", color = "black") +
-  labs(
-    title = "EDTA – TE Score Distribution",
-    x = "Score",
-    y = "Count"
-  ) +
-  theme_bw()
-
-
-ggplot(earl2, aes(x = score)) +
-  geom_histogram(bins = 50, fill = "darkorange", color = "black") +
-  labs(
-    title = "Earl Grey – TE Score Distribution",
-    x = "Score",
-    y = "Count"
-  ) +
-  theme_bw()
-
-par(mfrow=c(1,2))
-
-```
-
-```{r}
-ggplot(earl2, aes(x = score)) +
-  geom_histogram(bins = 200, fill = "darkorange", color = "black") +
-  coord_cartesian(xlim = c(20000, max(earl2$score, na.rm = TRUE))) +
-  labs(
-    title = "Earl Grey – TE Score Distribution (Zoomed)",
-    x = "Score",
-    y = "Count"
-  ) +
-  theme_bw()
-
-```
-
-
-```{r}
-max(earl2$score)
-min(earl2$score)
-```
-
-```{r}
-library(patchwork)
-
-p_edta_score <- ggplot(edta2, aes(x = log10(score + 1))) +
-  geom_histogram(bins = 50, fill = "steelblue", color = "black") +
-  labs(
-    x = "log10(Score + 1)",
-    y = "Count"
-  ) +
-  theme_bw()
-
-p_earl_score <- ggplot(earl2, aes(x = log10(score + 1))) +
-  geom_histogram(bins = 50, fill = "darkorange", color = "black") +
-  labs(
-    x = "log10(Score + 1)",
-    y = "Count"
-  ) +
-  theme_bw()
-
-p_edta_score | p_earl_score
-
-```
-
-```{r}
-library(patchwork)
-
-# Common x-axis limits
-xmin <- min(c(log10(edta2$score + 1), log10(earl2$score + 1)), na.rm = TRUE)
-xmax <- max(c(log10(edta2$score + 1), log10(earl2$score + 1)), na.rm = TRUE)
-
-p_edta_score_den <- ggplot(edta2, aes(x = log10(score + 1))) +
-  geom_density(fill = "steelblue", alpha = 0.35, linewidth = 1) +
-  scale_x_continuous(limits = c(xmin, xmax)) +
-  labs(
-    x = "log10(Score + 1)",
-    y = "Density"
-  ) +
-  theme_bw()
-
-p_earl_score_den <- ggplot(earl2, aes(x = log10(score + 1))) +
-  geom_density(fill = "darkorange", alpha = 0.35, linewidth = 1) +
-  scale_x_continuous(limits = c(xmin, xmax)) +
-  labs(
-    x = "log10(Score + 1)",
-    y = "Density"
-  ) +
-  theme_bw()
-
-p_edta_score_den | p_earl_score_den
-
-```
 
