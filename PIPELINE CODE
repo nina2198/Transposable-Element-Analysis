@@ -1,36 +1,18 @@
-# Earl Grey- S. mansoni
-source $VSC_DATA/miniconda3/etc/profile.d/conda.sh
+# Earl Grey -> D. melanogaster
+
 conda activate earlgrey
-
-echo "CPUs allocated: $SLURM_CPUS_PER_TASK"
-echo "Job started: $(date)"
-
 earlGrey \
-  -g $VSC_DATA/final_analysis/s_mansoni_fasta \
-  -s schistosomaMansoni \
-  -o $VSC_DATA/final_analysis/mansoni_out \
+  -g $VSC_DATA/benchmarking/d_melanogaster_fasta \
+  -s drosophilaMelanogaster \
+  -o $VSC_DATA/benchmarking/d_melanogaster_out \
   -t $SLURM_CPUS_PER_TASK
 
-echo "Job ended: $(date)"
 
-# EDTA
-source "$VSC_DATA/miniconda3/etc/profile.d/conda.sh"
-conda activate EDTA
+# EDTA -> D. melanogaster
 
-GENOME="$VSC_DATA/final_analysis/s_mansoni_fasta"
-OUTDIR="$VSC_DATA/final_analysis/edta_runs/EDTA_Smansoni_${SLURM_JOB_ID}"
-
-SCRATCH=${SLURM_TMPDIR:-/tmp/$SLURM_JOB_ID}
-WORKDIR="$SCRATCH/edta_work"
-mkdir -p "$WORKDIR"
-
-rsync -avh "$GENOME" "$WORKDIR/"
-cd "$WORKDIR"
-
-GENOME_BASENAME="$(basename "$GENOME")"
-
+conda activate edta
 EDTA.pl \
-  --genome "$GENOME_BASENAME" \
+  --genome  d_melanogaster_fasta \
   --species others \
   --step all \
   --anno 1 \
@@ -38,5 +20,45 @@ EDTA.pl \
   --force 1 \
   --threads "$THREADS"
 
-mkdir -p "$OUTDIR"
-rsync -avh "$WORKDIR"/ "$OUTDIR"/
+
+# Earl Grey -> S. mansoni
+conda activate earlgrey
+earlGrey \
+  -g $VSC_DATA/final_analysis/s_mansoni_fasta \
+  -s schistosomaMansoni \
+  -o $VSC_DATA/final_analysis/mansoni_out \
+  -t $SLURM_CPUS_PER_TASK
+
+# Earl Grey -> S. mediterranea
+conda activate earlgrey
+earlGrey \
+  -g $VSC_DATA/final_analysis/s_mediterranea_fasta \
+  -s schistosomaMansoni \
+  -o $VSC_DATA/final_analysis/mediterranea_out \
+  -t $SLURM_CPUS_PER_TASK
+
+# EDTA -> S. mansoni
+conda activate edta
+EDTA.pl \
+  --genome  s_mansoni_fasta \
+  --species others \
+  --step all \
+  --anno 1 \
+  --sensitive 1 \
+  --force 1 \
+  --threads "$THREADS"
+
+# EDTA -> S. mediterranea
+conda activate edta
+EDTA.pl \
+  --genome  s_mediterranea_fasta \
+  --species others \
+  --step all \
+  --anno 1 \
+  --sensitive 1 \
+  --force 1 \
+  --threads "$THREADS"
+
+
+# See the respective github pages for commands.
+
