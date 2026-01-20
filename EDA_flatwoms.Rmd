@@ -1,13 +1,4 @@
----
-title: "EDA_final"
-author: "Banguket Nina(2366065)"
-date: "2026-01-17"
-output: pdf_document
----
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
 
 ```{r include=FALSE}
 library(rtracklayer)
@@ -24,10 +15,6 @@ library(kableExtra)
 library(ggplot2)
 ```
 
-
-```{r}
-setwd("~/Desktop/Thesis/final_analysis")
-```
 
 
 ```{r}
@@ -452,7 +439,6 @@ ggplot(length_tbl,
 ```
 
 ```{r}
-library(dplyr)
 library(scales)
 
 order_bp <- length_tbl %>%
