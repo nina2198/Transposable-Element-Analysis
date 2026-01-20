@@ -1,0 +1,931 @@
+---
+title: "EDA_final"
+author: "Banguket Nina(2366065)"
+date: "2026-01-17"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+library(rtracklayer)
+library(Biostrings)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(patchwork)
+library(stringr)
+library(tibble)
+library(kableExtra)
+library(ggplot2)
+```
+
+
+```{r}
+setwd("~/Desktop/Thesis/final_analysis")
+```
+
+
+```{r}
+# importing standardised data
+ mansoni_std <- read.csv("/Users/ninabanguket/Desktop/Thesis/final_analysis/mansoni_TE_std.csv")
+
+medit_std <- read.csv("/Users/ninabanguket/Desktop/Thesis/final_analysis/medit_TE_std.csv")
+```
+
+
+```{r}
+
+# Global composition table
+composition_tbl <- bind_rows(
+  mansoni_std %>%
+    summarise(
+      species = "S. mansoni",
+      n_TE_annotations = n(),
+      total_te_bp = sum(width, na.rm = TRUE),
+      mean_te_length_bp = mean(width, na.rm = TRUE),
+      median_te_length_bp = median(width, na.rm = TRUE)
+    ),
+  medit_std %>%
+    summarise(
+      species = "S. mediterranea",
+      n_TE_annotations = n(),
+      total_te_bp = sum(width, na.rm = TRUE),
+      mean_te_length_bp = mean(width, na.rm = TRUE),
+      median_te_length_bp = median(width, na.rm = TRUE)
+    )
+)
+
+
+composition_tbl <- composition_tbl %>%
+  dplyr::mutate(species_lab = dplyr::case_when(
+    species == "S. mansoni" ~ "italic('S. mansoni')",
+    species == "S. mediterranea" ~ "italic('S. mediterranea')",
+    TRUE ~ species
+  ))
+
+
+kable(composition_tbl, caption = "Global TE composition") %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+```{r}
+
+composition_tbl <- bind_rows(
+  mansoni_std %>%
+    group_by(class_I_II) %>%
+    summarise(
+      total_bp = sum(width, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      species = "italic('S. mansoni')"
+    ),
+
+  medit_std %>%
+    group_by(class_I_II) %>%
+    summarise(
+      total_bp = sum(width, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      species = "italic('S. mediterranea')"
+    )
+) %>%
+  group_by(species) %>%
+  mutate(
+    pct_bp = 100 * total_bp / sum(total_bp)
+  ) %>%
+  ungroup()
+
+```
+
+```{r}
+composition_tbl %>% arrange(species, desc(total_bp))
+
+```
+
+
+
+
+
+
+```{r}
+
+composition_tbl_plot <- composition_tbl %>%
+  mutate(
+    class_I_II = case_when(
+      class_I_II == "I"  ~ "Retrotransposons",
+      class_I_II == "II" ~ "DNA transposons",
+      TRUE               ~ "Unknown"
+    ),
+    class_I_II = factor(
+      class_I_II,
+      levels = c("Retrotransposons", "DNA transposons", "Unknown")
+    )
+  )
+
+ggplot(composition_tbl_plot,
+       aes(x = class_I_II, y = pct_bp, fill = class_I_II)) +
+  geom_col(width = 0.7) +
+  facet_wrap(~ species) +
+  labs(
+    x = "TE class",
+    y = "Proportion of total TE base pairs"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    strip.background = element_blank()
+  )
+
+```
+## by TE number
+
+```{r}
+composition_count_tbl <- bind_rows(
+  mansoni_std %>%
+    count(class_I_II, name = "n_annotations") %>%
+    mutate(species = "S. mansoni"),
+
+  medit_std %>%
+    count(class_I_II, name = "n_annotations") %>%
+    mutate(species = "S. mediterranea")
+) %>%
+  group_by(species) %>%
+  mutate(
+    pct_annotations = 100 * n_annotations / sum(n_annotations)
+  ) %>%
+  ungroup()
+
+```
+
+```{r}
+composition_count_tbl %>% arrange(species, desc(n_annotations))
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(composition_count_tbl,
+       aes(x = class_I_II, y = pct_annotations, fill = class_I_II)) +
+  geom_col(width = 0.7) +
+  facet_wrap(~ species) + 
+  labs(
+    x = "TE class",
+    y = "Percentage of TE annotations"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    strip.background = element_blank()
+  )
+
+```
+# TE composition by order
+
+
+
+```{r}
+order_bp_tbl <- bind_rows(
+  mansoni_std %>%
+    group_by(order) %>%
+    summarise(
+      total_bp = sum(width, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(species = "S. mansoni"),
+
+  medit_std %>%
+    group_by(order) %>%
+    summarise(
+      total_bp = sum(width, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(species = "S. mediterranea")
+) %>%
+  group_by(species) %>%
+  mutate(
+    pct_bp = 100 * total_bp / sum(total_bp)
+  ) %>%
+  ungroup()
+
+
+```
+
+```{r}
+order_bp_tbl %>% arrange(species, desc(total_bp))
+
+```
+
+```{r}
+# Define a fixed TE order (adjust only if you truly need to)
+order_levels <- c(
+  "LINE",
+  "LTR",
+  "PLE",
+  "SINE",
+  "TIR",
+  "Helitron",
+  "Unknown"
+)
+
+order_bp_tbl <- order_bp_tbl %>%
+  mutate(order = factor(order, levels = order_levels))
+
+ggplot(order_bp_tbl,
+       aes(x = order, y = pct_bp, fill = order)) +
+  geom_col(width = 0.7) +
+  facet_wrap(~ species, scales = "free_x") +
+  labs(
+    x = "TE order",
+    y = "Proportion of total TE base pairs"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    strip.background = element_blank()
+  )
+
+
+```
+
+```{r}
+### by count
+
+order_count_tbl <- bind_rows(
+  mansoni_std %>%
+    count(order, name = "n_annotations") %>%
+    mutate(species = "S. mansoni"),
+
+  medit_std %>%
+    count(order, name = "n_annotations") %>%
+    mutate(species = "S. mediterranea")
+) %>%
+  group_by(species) %>%
+  mutate(
+    pct_annotations = 100 * n_annotations / sum(n_annotations)
+  ) %>%
+  ungroup()
+
+```
+
+```{r}
+order_levels <- c(
+  "LINE",
+  "LTR",
+  "PLE",
+  "SINE",
+  "TIR",
+  "Helitron",
+  "Unknown"
+)
+
+order_count_tbl <- order_count_tbl %>%
+  mutate(order = factor(order, levels = order_levels))
+
+
+
+ggplot(order_count_tbl,
+       aes(x = order, y = pct_annotations, fill = order)) +
+  geom_col(width = 0.7) +
+  facet_wrap(~ species, scales = "free_x") +
+  labs(
+    x = "TE order",
+    y = "Percentage of TE annotations"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    strip.background = element_blank()
+  )
+
+```
+# By superfamily
+
+```{r}
+superfamily_bp_tbl <- bind_rows(
+  mansoni_std %>%
+    group_by(superfamily) %>%
+    summarise(
+      total_bp = sum(width, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(species = "S. mansoni"),
+
+  medit_std %>%
+    group_by(superfamily) %>%
+    summarise(
+      total_bp = sum(width, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(species = "S. mediterranea")
+) %>%
+  group_by(species) %>%
+  mutate(
+    pct_bp = 100 * total_bp / sum(total_bp)
+  ) %>%
+  ungroup()
+
+```
+
+```{r}
+superfamily_bp_tbl %>% arrange(species, desc(total_bp))
+
+```
+
+
+```{r}
+ggplot(superfamily_bp_tbl,
+       aes(x = superfamily, y = pct_bp, fill = superfamily)) +
+  geom_col(width = 0.7) +
+  facet_wrap(~ species, scales = "free_x") +
+  labs(
+    x = "TE superfamily",
+    y = "Percentage of total TE bp"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    strip.background = element_blank()
+  )
+
+```
+
+```{r}
+# by count
+superfamily_count_tbl <- bind_rows(
+  mansoni_std %>%
+    count(superfamily, name = "n_annotations") %>%
+    mutate(species = "S. mansoni"),
+
+  medit_std %>%
+    count(superfamily, name = "n_annotations") %>%
+    mutate(species = "S. mediterranea")
+) %>%
+  group_by(species) %>%
+  mutate(
+    pct_annotations = 100 * n_annotations / sum(n_annotations)
+  ) %>%
+  ungroup()
+
+superfamily_count_tbl %>% arrange(species, desc(n_annotations))
+
+```
+```{r}
+ggplot(superfamily_count_tbl,
+       aes(x = superfamily, y = pct_annotations, fill = superfamily)) +
+  geom_col(width = 0.7) +
+  facet_wrap(~ species, scales = "free_x") +
+  labs(
+    x = "TE superfamily(by count)",
+    y = "Percentage of TE annotations"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    strip.background = element_blank()
+  )
+
+```
+
+## by length
+
+```{r}
+library(ggplot2)
+
+length_tbl <- bind_rows(
+  mansoni_std %>% mutate(species = "S. mansoni"),
+  medit_std   %>% mutate(species = "S. mediterranea")
+)
+
+ggplot(length_tbl,
+       aes(x = width, colour = species, fill = species)) +
+  geom_density(alpha = 0.3, linewidth = 0.8) +
+  scale_x_log10() +
+  labs(
+    x = "TE length (bp, log10)",
+    y = "Density"
+  ) +
+  theme_bw()
+
+```
+```{r}
+ggplot(length_tbl,
+       aes(x = width, fill = order)) +
+  geom_density(alpha = 0.4) +
+  scale_x_log10() +
+  facet_wrap(~ species, ncol = 1) +
+  labs(
+    x = "TE length (bp, log10)",
+    y = "Density",
+    fill = "TE order"
+  ) +
+  theme_bw()
+
+```
+
+```{r}
+ggplot(length_tbl,
+       aes(x = width, colour = species)) +
+  geom_density(adjust = 0.6, linewidth = 0.9) +
+  scale_x_log10() +
+  facet_wrap(~ order, scales = "free_y") +
+  labs(
+    x = "TE length (bp, log10)",
+    y = "Density"
+  ) +
+  theme_bw() +
+  theme(legend.position = "top")
+
+```
+
+```{r}
+library(dplyr)
+library(scales)
+
+order_bp <- length_tbl %>%
+  filter(!is.na(width), width > 0, !is.na(order)) %>%
+  group_by(species, order) %>%
+  summarise(
+    n = n(),
+    total_bp = sum(width, na.rm = TRUE),
+    median_bp = median(width, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(species) %>%
+  mutate(
+    prop_bp = total_bp / sum(total_bp),
+    prop_n  = n / sum(n)
+  ) %>%
+  ungroup() %>%
+  arrange(species, desc(total_bp))
+
+order_bp
+
+```
+
+```{r}
+super_bp <- length_tbl %>%
+  filter(!is.na(width), width > 0, !is.na(superfamily)) %>%
+  group_by(species, superfamily) %>%
+  summarise(
+    n = n(),
+    total_bp = sum(width, na.rm = TRUE),
+    median_bp = median(width, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(species) %>%
+  mutate(
+    prop_bp = total_bp / sum(total_bp),
+    prop_n  = n / sum(n)
+  ) %>%
+  ungroup() %>%
+  arrange(species, desc(total_bp))
+
+super_bp
+
+```
+
+```{r}
+ggplot(length_tbl,
+       aes(x = width, colour = species)) +
+  geom_density(linewidth = 0.8) +
+  scale_x_log10() +
+  facet_wrap(~ order, scales = "free_y") +
+  labs(
+    x = "TE length (bp, log10)",
+    y = "Density"
+  ) +
+  theme_bw()
+
+```
+
+
+```{r}
+ggplot(length_tbl %>% filter(order == "LINE"),
+       aes(x = width, fill = superfamily)) +
+  geom_density(alpha = 0.4) +
+  scale_x_log10() +
+  facet_wrap(~ species, ncol = 1) +
+  theme_bw()
+
+```
+
+
+
+```{r}
+length_class_tbl <- length_tbl %>%
+  group_by(species, class_I_II) %>%
+  summarise(
+    n_annotations = n(),
+    mean_len = mean(width, na.rm = TRUE),
+    median_len = median(width, na.rm = TRUE),
+    p95_len = quantile(width, 0.95, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+```
+
+```{r}
+ggplot(length_tbl,
+       aes(x = class_I_II, y = width, fill = class_I_II)) +
+  geom_boxplot(outlier.size = 0.3) +
+  scale_y_log10() +
+  facet_wrap(~ species) +
+  labs(
+    x = "TE class",
+    y = "TE length (bp, log10 scale)"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none"
+  )
+
+```
+
+
+```{r}
+# length by order
+
+length_order_tbl <- length_tbl %>%
+  group_by(species, order) %>%
+  summarise(
+    n_annotations = n(),
+    mean_len = mean(width, na.rm = TRUE),
+    median_len = median(width, na.rm = TRUE),
+    p95_len = quantile(width, 0.95, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+ggplot(length_tbl,
+       aes(x = order, y = width, fill = order)) +
+  geom_boxplot(outlier.size = 0.3) +
+  scale_y_log10() +
+  facet_wrap(~ species, scales = "free_x") +
+  labs(
+    x = "TE order",
+    y = "TE length (bp, log10 scale)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+
+```
+
+```{r}
+# by superfamily
+length_tbl <- bind_rows(
+  mansoni_std %>% mutate(species = "S. mansoni"),
+  medit_std   %>% mutate(species = "S. mediterranea")
+)
+
+
+ggplot(length_tbl,
+       aes(x = superfamily, y = width, fill = species)) +
+  geom_boxplot(
+    position = position_dodge(width = 0.75),
+    outlier.size = 0.3
+  ) +
+  scale_y_log10() +
+  labs(
+    x = "TE superfamily",
+    y = "TE length (bp, log10 scale)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_blank()
+  )
+
+```
+
+```{r}
+length_superfamily_tbl <- length_tbl %>%
+  group_by(species, superfamily) %>%
+  summarise(
+    n_annotations = n(),
+    mean_len = mean(width, na.rm = TRUE),
+    median_len = median(width, na.rm = TRUE),
+    p95_len = quantile(width, 0.95, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+```
+
+## length comparison for commom orders and superfamilies
+
+```{r}
+length_tbl <- bind_rows(
+  mansoni_std %>% mutate(species = "S. mansoni"),
+  medit_std   %>% mutate(species = "S. mediterranea")
+)
+
+# by order
+
+# Identifying common orders
+common_orders <- length_tbl %>%
+  distinct(species, order) %>%
+  count(order, name = "n_species") %>%
+  filter(n_species == 2) %>%
+  pull(order)
+
+length_common_orders <- length_tbl %>%
+  filter(order %in% common_orders) %>%
+  mutate(order = factor(order, levels = sort(unique(order))))
+
+ggplot(length_common_orders,
+       aes(x = order, y = width, fill = species)) +
+  geom_boxplot(
+    position = position_dodge(width = 0.75),
+    outlier.size = 0.3
+  ) +
+  scale_y_log10() +
+  labs(
+    x = "TE order (common to both species)",
+    y = "TE length (bp, log10 )"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_blank()
+  )
+
+
+```
+
+```{r}
+# by superfamily
+# Identifying common superfamilies 
+common_superfamilies <- length_tbl %>%
+  distinct(species, superfamily) %>%
+  count(superfamily, name = "n_species") %>%
+  filter(n_species == 2) %>%
+  pull(superfamily)
+
+length_common_superfamilies <- length_tbl %>%
+  filter(superfamily %in% common_superfamilies) %>%
+  mutate(superfamily = factor(superfamily, levels = sort(unique(superfamily))))
+
+ggplot(length_common_superfamilies,
+       aes(x = superfamily, y = width, fill = species)) +
+  geom_boxplot(
+    position = position_dodge(width = 0.75),
+    outlier.size = 0.3
+  ) +
+  scale_y_log10() +
+  labs(
+    x = "TE superfamily (common to both species)",
+    y = "TE length (bp, log10)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_blank()
+  )
+
+```
+## filtered to atleast 100 annotations per rank
+
+```{r}
+min_n <- 200  # change this threshold if needed
+
+length_tbl <- bind_rows(
+  mansoni_std %>% mutate(species = "S. mansoni"),
+  medit_std   %>% mutate(species = "S. mediterranea")
+)
+
+```
+
+```{r}
+# by order
+# Orders present in both species with at least min_n annotations per species
+common_orders_keep <- length_tbl %>%
+  group_by(species, order) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(order) %>%
+  summarise(
+    n_species = n(),
+    min_n_per_species = min(n),
+    .groups = "drop"
+  ) %>%
+  filter(n_species == 2, min_n_per_species >= min_n) %>%
+  pull(order)
+
+length_common_orders <- length_tbl %>%
+  filter(order %in% common_orders_keep) %>%
+  mutate(order = factor(order, levels = sort(unique(order))))
+
+ggplot(length_common_orders,
+       aes(x = order, y = width, fill = species)) +
+  geom_boxplot(
+    position = position_dodge(width = 0.75),
+    outlier.size = 0.3
+  ) +
+  scale_y_log10() +
+  labs(
+    x = paste0("TE order (common; ≥", min_n, " annotations per species)"),
+    y = "TE length (bp, log10 scale)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top",
+    strip.background = element_blank()
+  )
+
+```
+```{r}
+# by superfamily
+# Superfamilies present in both species with at least min_n annotations per species
+common_superfamilies_keep <- length_tbl %>%
+  group_by(species, superfamily) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(superfamily) %>%
+  summarise(
+    n_species = n(),
+    min_n_per_species = min(n),
+    .groups = "drop"
+  ) %>%
+  filter(n_species == 2, min_n_per_species >= min_n) %>%
+  pull(superfamily)
+
+length_common_superfamilies <- length_tbl %>%
+  filter(superfamily %in% common_superfamilies_keep) %>%
+  mutate(superfamily = factor(superfamily, levels = sort(unique(superfamily))))
+
+ggplot(length_common_superfamilies,
+       aes(x = superfamily, y = width, fill = species)) +
+  geom_boxplot(
+    position = position_dodge(width = 0.75),
+    outlier.size = 0.3
+  ) +
+  scale_y_log10() +
+  labs(
+    x = paste0("TE superfamily (common; ≥", min_n, " annotations per species)"),
+    y = "TE length (bp, log10 scale)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top",
+    strip.background = element_blank()
+  )
+
+```
+
+```{r}
+common_orders_keep
+common_superfamilies_keep
+
+```
+
+```{r}
+sf_counts <- length_tbl %>%
+  group_by(species, superfamily) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = species, values_from = n, values_fill = 0) %>%
+  mutate(
+    is_common = (`S. mansoni` > 0 & `S. mediterranea` > 0),
+    min_n_per_species = pmin(`S. mansoni`, `S. mediterranea`),
+    passes_threshold = is_common & min_n_per_species >= min_n
+  ) %>%
+  arrange(passes_threshold, min_n_per_species)
+
+# Superfamilies that are common but fail the threshold
+sf_counts %>%
+  filter(is_common, !passes_threshold)
+
+```
+
+## Common vs different orders/superfamillies
+
+```{r}
+#presence/absence table
+
+# superfamily
+sf_presence_tbl <- tibble(
+  superfamily = sort(
+    unique(c(mansoni_std$superfamily,
+             medit_std$superfamily))
+  )
+) %>%
+  filter(superfamily != "Unknown") %>%
+  mutate(
+    `S. mansoni` = superfamily %in% mansoni_std$superfamily,
+    `S. mediterranea` = superfamily %in% medit_std$superfamily
+  ) %>%
+  mutate(
+    category = case_when(
+      `S. mansoni` & `S. mediterranea` ~ "Shared",
+      `S. mansoni` & !`S. mediterranea` ~ "Mansoni-only",
+      !`S. mansoni` & `S. mediterranea` ~ "Mediterranea-only"
+    )
+  )
+```
+
+```{r}
+table(sf_presence_tbl$category)
+
+```
+
+```{r}
+sf_category_counts <- sf_presence_tbl %>%
+  count(category, name = "n_superfamilies")
+sf_category_counts
+```
+
+```{r}
+# unknowns at superfamily level
+unknown_summary <- bind_rows(
+  mansoni_std %>% filter(superfamily == "Unknown") %>% mutate(species = "S. mansoni"),
+  medit_std   %>% filter(superfamily == "Unknown") %>% mutate(species = "S. mediterranea")
+) %>%
+  group_by(species) %>%
+  summarise(
+    n_annotations = n(),
+    total_bp = sum(width, na.rm = TRUE),
+    .groups = "drop"
+  )
+unknown_summary
+```
+
+```{r}
+sf_bp_tbl <- bind_rows(
+  mansoni_std %>%
+    filter(superfamily != "Unknown") %>%
+    group_by(superfamily) %>%
+    summarise(
+      total_bp = sum(width, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(species = "S. mansoni"),
+
+  medit_std %>%
+    filter(superfamily != "Unknown") %>%
+    group_by(superfamily) %>%
+    summarise(
+      total_bp = sum(width, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(species = "S. mediterranea")
+)
+
+```
+
+```{r}
+sf_bp_category_summary <- sf_bp_tbl %>%
+  left_join(sf_presence_tbl, by = "superfamily") %>%
+  group_by(species, category) %>%
+  summarise(
+    total_bp = sum(total_bp),
+    .groups = "drop"
+  )
+# SC
+sf_bp_category_summary
+
+```
+```{r}
+sf_bp_category_pct <- sf_bp_category_summary %>%
+  group_by(species) %>%
+  mutate(
+    pct_bp = 100 * total_bp / sum(total_bp)
+  ) %>%
+  ungroup()
+
+sf_bp_category_pct
+```
+
+
+```{r}
+ggplot(sf_bp_category_summary,
+       aes(x = category, y = total_bp, fill = species)) +
+  geom_col(position = "dodge") +
+  labs(
+    x = "Superfamily category (Unknown excluded)",
+    y = "Total TE bp"
+  ) +
+  theme_bw()
+
+```
+
+
+```{r}
+table(mansoni_std$superfamily)
+```
+
+

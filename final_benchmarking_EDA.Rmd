@@ -1,0 +1,208 @@
+---
+title: "benchmarking_EDA_final"
+author: "Banguket Nina(2366065)"
+date: "2026-01-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+ setwd("~/Desktop/Thesis/Benchmarking/benchmarking_EDA")
+```
+
+```{r include=FALSE}
+library(rtracklayer)
+library(Biostrings)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(patchwork)
+library(stringr)
+```
+
+```{r data import, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Importing drosophila TE annotation from EDTA
+edta_std <- read.csv("~/Desktop/Thesis/Benchmarking/benchmarking_EDA/droso_edta_standardised.csv")
+
+#Importing Drosophila M annotation from EarlGrey droso_earlG_standardised.csv
+earlG_std <- read.csv("~/Desktop/Thesis/Benchmarking/benchmarking_EDA/droso_earlG_standardised.csv")
+```
+
+
+```{r}
+head(earlG_std)
+head(edta_std)
+```
+
+
+
+```{r echo=FALSE}
+# Compute summary values
+avg_width_edta   <- round(mean(edta_std$width,  na.rm = TRUE), 2)
+avg_width_earlG  <- round(mean(earlG_std$width, na.rm = TRUE), 2)
+
+avg_score_edta   <- round(mean(edta_std$score,  na.rm = TRUE), 2)
+avg_score_earlG  <- round(mean(earlG_std$score, na.rm = TRUE), 2)
+
+# Construct table
+comparison_table <- data.frame(
+  Dataset = c("EDTA TE-only", "EarlGrey TE-only"),
+  Avg_Width = c(avg_width_edta, avg_width_earlG),
+  Avg_Score = c(avg_score_edta, avg_score_earlG)
+)
+
+# Render kable
+knitr::kable(
+  comparison_table,
+  caption = "Comparison of Average Width and Average Score Between EDTA and EarlGrey TE-only Datasets"
+)
+
+```
+
+
+```{r}
+# 1) Quick schema overview
+cat("EDTA columns:\n")
+print(colnames(edta_std))
+
+cat("\nEarlGrey columns:\n")
+print(colnames(earlG_std))
+
+cat("\nEDTA dimensions:", dim(edta_std), "\n")
+cat("EarlGrey dimensions:", dim(earlG_std), "\n")
+```
+
+
+```{r step1_schema_qc, message=FALSE, warning=FALSE}
+# ---------------------------
+# Step 1: Schema overview
+# ---------------------------
+cat("EDTA columns:\n")
+print(colnames(edta_std))
+
+cat("\nEarlGrey columns:\n")
+print(colnames(earlG_std))
+
+cat("\nEDTA dimensions:", dim(edta_std), "\n")
+cat("EarlGrey dimensions:", dim(earlG_std), "\n")
+
+
+# ---------------------------
+# Basic missingness QC
+# ---------------------------
+na_summary <- function(df){
+  tibble(
+    column = names(df),
+    n_missing = sapply(df, function(x) sum(is.na(x))),
+    pct_missing = round(100 * n_missing / nrow(df), 2)
+  ) %>%
+    arrange(desc(n_missing))
+}
+
+cat("\nTop missing columns in EDTA:\n")
+print(head(na_summary(edta_std), 15))
+
+cat("\nTop missing columns in EarlGrey:\n")
+print(head(na_summary(earlG_std), 15))
+
+
+# ---------------------------
+# Basic coordinate QC (as-is)
+# Will only run checks if columns exist
+# ---------------------------
+coord_qc <- function(df){
+  coord_cols <- c("seqnames","start","end","width","strand","seqid")
+  present <- coord_cols[coord_cols %in% names(df)]
+  cat("\nCoordinate-related columns present:", paste(present, collapse=", "), "\n")
+
+  out <- list()
+
+  if ("start" %in% names(df) && "end" %in% names(df)) {
+    out$invalid_start_gt_end <- sum(!is.na(df$start) & !is.na(df$end) & df$start > df$end)
+    out$missing_start <- sum(is.na(df$start))
+    out$missing_end <- sum(is.na(df$end))
+  }
+
+  if ("width" %in% names(df)) {
+    out$nonpositive_width <- sum(!is.na(df$width) & df$width <= 0)
+    out$missing_width <- sum(is.na(df$width))
+  }
+
+  if ("seqnames" %in% names(df)) out$missing_seqnames <- sum(is.na(df$seqnames) | df$seqnames == "")
+  if ("seqid" %in% names(df)) out$missing_seqid <- sum(is.na(df$seqid) | df$seqid == "")
+
+  as.data.frame(out)
+}
+
+cat("\nEDTA coordinate QC:\n")
+print(coord_qc(edta_std))
+
+cat("\nEarlGrey coordinate QC:\n")
+print(coord_qc(earlG_std))
+
+```
+
+
+```{r step2_summary_table, message=FALSE, warning=FALSE}
+# Step 2: High-level comparisons
+# Uses existing columns: seqnames + width
+
+summary_table <- tibble(
+  pipeline = c("EDTA", "EarlGrey"),
+  n_TE  = c(nrow(edta_std), nrow(earlG_std)),
+  total_bp = c(sum(edta_std$width, na.rm = TRUE),
+               sum(earlG_std$width, na.rm = TRUE))
+) %>%
+  mutate(total_bp_Mb = round(total_bp / 1e6, 2))
+
+kable(summary_table, align = "lrrr") %>%
+  kable_styling(full_width = FALSE)
+```
+
+
+```{r}
+plot_totalbp <- summary_table %>%
+  ggplot(aes(x = pipeline, y = total_bp_Mb, fill=pipeline)) +
+  geom_col() +
+  theme_bw() +
+  labs(x = NULL, y = "Total annotated bp (Mb; raw sum of widths)") +
+  theme(plot.title = element_blank())
+
+plot_totalbp
+```
+
+```{r}
+library(GenomicRanges)
+
+# Convert to GRanges using columns as-is
+# Requires: seqnames, start, end
+to_gr <- function(df){
+  GRanges(
+    seqnames = df$seqnames,
+    ranges = IRanges(start = df$start, end = df$end)
+  )
+}
+
+edta_gr  <- to_gr(edta_std)
+earlg_gr <- to_gr(earlG_std)
+
+# Reduce intervals per pipeline (merge overlaps)
+edta_red  <- reduce(edta_gr)
+earlg_red <- reduce(earlg_gr)
+
+unique_cov_table <- tibble(
+  pipeline = c("EDTA", "EarlGrey"),
+  unique_bp = c(sum(width(edta_red)), sum(width(earlg_red)))
+) %>%
+  mutate(unique_bp_Mb = round(unique_bp / 1e6, 2))
+
+kable(unique_cov_table, align = "lrr") %>%
+  kable_styling(full_width = FALSE)
+```
+
+

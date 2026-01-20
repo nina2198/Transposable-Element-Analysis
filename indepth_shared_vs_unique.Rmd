@@ -1,0 +1,403 @@
+---
+title: "indepth_anlyis_shared_vs_unique"
+author: "Banguket Nina(2366065)"
+date: "2026-01-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("~/Desktop/Thesis/final_analysis")
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(tibble)
+library(knitr)
+library(kableExtra)
+
+```
+
+```{r}
+# importing standardised data
+ mansoni_std <- read.csv("/Users/ninabanguket/Desktop/Thesis/final_analysis/mansoni_TE_std.csv")
+
+medit_std <- read.csv("/Users/ninabanguket/Desktop/Thesis/final_analysis/medit_TE_std.csv")
+```
+
+## Analysis of shared Superfamilies
+
+```{r}
+sf_presence_tbl <- tibble(
+  superfamily = sort(unique(c(mansoni_std$superfamily, medit_std$superfamily)))
+) %>%
+  filter(superfamily != "Unknown") %>%
+  mutate(
+    in_mansoni = superfamily %in% mansoni_std$superfamily,
+    in_medit   = superfamily %in% medit_std$superfamily,
+    category = case_when(
+      in_mansoni & in_medit ~ "Shared",
+      in_mansoni & !in_medit ~ "Mansoni-only",
+      !in_mansoni & in_medit ~ "Mediterranea-only"
+    )
+  )
+
+shared_sf <- sf_presence_tbl %>%
+  filter(category == "Shared") %>%
+  pull(superfamily)
+
+# sanity check
+table(sf_presence_tbl$category)
+length(shared_sf)
+
+```
+
+
+
+```{r}
+# Combine both species into one comparative table
+
+comp_tbl <- bind_rows(
+  mansoni_std %>% mutate(species = "mansoni"),
+  medit_std   %>% mutate(species = "mediterranea")
+)
+
+# Optional: enforce required columns exist
+stopifnot(all(c("superfamily", "width") %in% names(comp_tbl)))
+
+
+```
+
+
+```{r}
+shared_sf_tbl <- comp_tbl %>%
+  filter(superfamily %in% shared_sf, superfamily != "Unknown") %>%
+  group_by(species, superfamily) %>%
+  summarise(
+    n_TE_annotations = n(),
+    total_bp = sum(width, na.rm = TRUE),
+    median_len = median(width, na.rm = TRUE),
+    p95_len = quantile(width, 0.95, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(species) %>%
+  mutate(
+    pct_bp = 100 * total_bp / sum(total_bp),
+    pct_annotations = 100 * n_TE_annotations / sum(n_TE_annotations)
+  ) %>%
+  ungroup()
+
+
+#sc`
+shared_sf_tbl %>% arrange(species, desc(total_bp))
+
+```
+
+
+
+
+```{r}
+shared_sf_wide <- shared_sf_tbl %>%
+  select(
+    species, superfamily,
+    n_TE_annotations, total_bp,
+    pct_annotations, pct_bp,
+    median_len, p95_len
+  ) %>%
+  pivot_wider(
+    names_from = species,
+    values_from = c(
+      n_TE_annotations, total_bp,
+      pct_annotations, pct_bp,
+      median_len, p95_len
+    )
+  ) %>%
+  mutate(
+    delta_bp         = total_bp_mansoni - total_bp_mediterranea,
+    delta_pct_bp     = pct_bp_mansoni - pct_bp_mediterranea,
+    delta_counts     = n_TE_annotations_mansoni - n_TE_annotations_mediterranea,
+    delta_median_len = median_len_mansoni - median_len_mediterranea
+  )
+
+
+```
+
+```{r}
+#RC
+shared_sf_wide %>% arrange(desc(abs(delta_pct_bp)))
+
+
+```
+
+```{r}
+write.csv(
+  shared_sf_wide,
+  file = "shared_sf.csv",
+  row.names = FALSE
+)
+```
+
+
+
+```{r}
+kable(shared_sf_tbl,
+      caption = "Shared superfamilies: counts, bp contribution, and length structure (per species; Unknown excluded).") %>%
+  kable_styling(full_width = FALSE)
+
+kable(shared_sf_wide %>%
+        select(superfamily, delta_bp, delta_pct_bp, delta_counts, delta_median_len),
+      caption = "Shared superfamilies: contrasts (mansoni − mediterranea).") %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+
+```{r}
+shared_sf_wide <- shared_sf_wide %>%
+  mutate(
+    dominant_species = case_when(
+      delta_pct_bp > 0 ~ "S. mansoni",
+      delta_pct_bp < 0 ~ "S. mediterranea",
+      TRUE ~ "Equal"
+    )
+  )
+
+
+# Figure: Δ %bp (mansoni − mediterranea), ranked
+ggplot(shared_sf_wide,
+       aes(
+         x = reorder(superfamily, delta_pct_bp),
+         y = delta_pct_bp,
+         fill = dominant_species
+       )) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    x = "Shared TE superfamily",
+    y = "Δ % TE bp (S. mansoni − S. mediterranea)",
+    fill = "Higher TE bp"
+  ) +
+  theme_bw()
+
+
+```
+
+```{r}
+head(shared_sf_wide)
+```
+
+```{r}
+
+comp_tbl_plot <- comp_tbl %>%
+  mutate(species = recode(species,
+                          mansoni = "S. mansoni",
+                          mediterranea = "S. mediterranea"))
+
+# Figure: shared superfamily length distributions (log scale)
+ggplot(
+  comp_tbl_plot %>% filter(superfamily %in% shared_sf, superfamily != "Unknown"),
+  aes(x = superfamily, y = width, fill = species)
+) +
+  geom_boxplot(
+    position = position_dodge(width = 0.75),
+    outlier.size = 0.3
+  ) +
+  scale_y_log10() +
+  labs(
+    x = "Shared TE superfamily",
+    y = "TE length (bp, log10 scale)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top"
+  )
+
+```
+
+```{r}
+table(sf_presence_tbl$category)
+shared_sf
+
+```
+
+
+## Analysis for unique superfamilies
+
+```{r}
+species_specific_sf <- sf_presence_tbl %>%
+  filter(category != "Shared") %>%
+  select(superfamily, category)
+
+species_specific_sf
+
+```
+# note that RTE family constitutes up to 84\%of the total TEs for s_mansoni specific(unique) TEs. R2 54\% for mediterranea.
+
+```{r}
+# Step 2: species-specific superfamilies summary (NO percentages)
+
+species_specific_tbl <- comp_tbl %>%
+  inner_join(species_specific_sf, by = "superfamily") %>%
+  group_by(species, superfamily, category) %>%
+  summarise(
+    n_TE_annotations = n(),
+    total_bp = sum(width, na.rm = TRUE),
+    median_len = median(width, na.rm = TRUE),
+    p95_len = quantile(width, 0.95, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# View it
+species_specific_tbl
+
+```
+```{r}
+write.csv(
+  species_specific_tbl,
+  file = "species_spe_sf",
+  row.names = FALSE
+)
+```
+
+
+```{r}
+species_totals <- comp_tbl %>%
+  group_by(species) %>%
+  summarise(
+    total_te_bp_all = sum(width, na.rm = TRUE),
+    total_te_annotations_all = n(),
+    .groups = "drop"
+  )
+
+species_specific_pct_tbl <- species_specific_tbl %>%
+  left_join(species_totals, by = "species") %>%
+  mutate(
+    pct_bp_all_TEs =
+      100 * total_bp / total_te_bp_all,
+    pct_annotations_all_TEs =
+      100 * n_TE_annotations / total_te_annotations_all
+  ) %>%
+  select(
+    species,
+    superfamily,
+    pct_bp_all_TEs,
+    pct_annotations_all_TEs
+  )
+
+
+
+
+#rc
+kable(
+  species_specific_pct_tbl,
+  caption = "Species-specific TE superfamilies: percentage of all TE bp and annotations per species."
+) %>%
+  kable_styling(full_width = FALSE)
+
+
+```
+
+```{r}
+write.csv(
+  species_specific_pct_tbl,
+  file = "species_spe_pct_sf",
+  row.names = FALSE
+)
+```
+
+
+# Comparison of shared vs unique TE families
+1. Do shared or species-specific TE lineages dominate the TE signal in each species?
+2. Is the dominance pattern the same for bp and for annotation counts?
+3. Are between-species differences driven by shared or unique lineages?
+4. Are species-specific superfamilies globally important or marginal?
+
+```{r}
+# Step 3 totals: all TEs but exclude Unknown superfamily (consistent with sf_presence_tbl)
+species_totals_step3 <- comp_tbl %>%
+  filter(superfamily != "Unknown") %>%
+  group_by(species) %>%
+  summarise(
+    total_te_bp_all = sum(width, na.rm = TRUE),
+    total_te_annotations_all = n(),
+    .groups = "drop"
+  )
+
+```
+
+
+```{r}
+comp_step3 <- comp_tbl %>%
+  filter(superfamily != "Unknown") %>%
+  left_join(
+    sf_presence_tbl %>% select(superfamily, category),
+    by = "superfamily"
+  ) %>%
+  mutate(
+    lineage_group = if_else(category == "Shared", "Shared", "Species-specific")
+  )
+
+# SC
+table(comp_step3$lineage_group, comp_step3$species)
+
+```
+
+```{r}
+step3_tbl <- comp_step3 %>%
+  group_by(species, lineage_group) %>%
+  summarise(
+    total_bp = sum(width, na.rm = TRUE),
+    n_TE_annotations = n(),
+    .groups = "drop"
+  ) %>%
+  left_join(species_totals_step3, by = "species") %>%
+  mutate(
+    pct_bp_all_TEs = 100 * total_bp / total_te_bp_all,
+    pct_annotations_all_TEs = 100 * n_TE_annotations / total_te_annotations_all
+  ) %>%
+  select(species, lineage_group, pct_bp_all_TEs, pct_annotations_all_TEs)
+
+```
+
+```{r}
+kable(
+  step3_tbl,
+  caption = "Step 3: Contribution of shared vs species-specific TE lineages (% of all TEs per species; Unknown excluded)."
+) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+```{r}
+ggplot(step3_tbl,
+       aes(x = species, y = pct_bp_all_TEs, fill = lineage_group)) +
+  geom_col(width = 0.7) +
+  labs(
+    x = "Species",
+    y = "% of all TE bp",
+    fill = "Lineage group"
+  ) +
+  theme_bw()
+
+```
+```{r}
+ggplot(step3_tbl,
+       aes(x = species, y = pct_annotations_all_TEs, fill = lineage_group)) +
+  geom_col(width = 0.7) +
+  labs(
+    x = "Species",
+    y = "% of all TE annotations",
+    fill = "Lineage group"
+  ) +
+  theme_bw()
+
+```
+
+## Since unique TEs constitute a higher percentage of the overall genome we look further into the shared ones ot answer: How does the same TE repertoire behave differently under different regulatory regimes (parasitic vs free-living)?

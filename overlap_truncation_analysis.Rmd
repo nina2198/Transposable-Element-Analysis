@@ -1,0 +1,1719 @@
+---
+title: "Overlap_truncation analysis"
+author: "Banguket Nina(2366065)"
+date: "2025-12-04"
+output:
+  pdf_document:
+    toc: false
+fontsize: 11pt
+geometry: margin=1in
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+setwd("~/Desktop/Thesis/Benchmarking/Overlap_analysis")
+```
+
+```{r include=FALSE}
+library(rtracklayer)
+library(Biostrings)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(patchwork)
+library(ggplot2)
+library(GenomicRanges)
+library(IRanges)
+library(stringr)
+library(irr)
+library(vegan)
+library(purrr)
+```
+
+```{r include=FALSE}
+earlGrey <- read.csv("~/Desktop/Thesis/Benchmarking/benchmarking_EDA/droso_earlG_standardised.csv")
+edta <- read.csv("~/Desktop/Thesis/Benchmarking/benchmarking_EDA/droso_edta_standardised.csv")
+```
+
+
+
+
+# Overlap Analysis
+
+EDTA identified 1767 chromosomes(seqnames) and Earl Grey 1402
+chromosomes. Both pipelines identified 1345 chromosomes in common,
+resulting in 422 identified by EDTA only and 57 by EarlGrey only.
+
+```{r include=FALSE}
+length(unique(edta$seqnames))
+length(unique(earlGrey$seqnames))
+```
+
+```{r include=FALSE}
+edta_chr  <- sort(unique(edta$seqnames))
+earl_chr  <- sort(unique(earlGrey$seqnames))
+
+```
+
+```{r include=FALSE}
+common_chr <- intersect(edta_chr, earl_chr)
+#common_chr
+length(common_chr)   
+
+```
+
+```{r include=FALSE}
+# Chromosomes only in EDTA
+chr_edta_only <- setdiff(edta_chr, earl_chr)
+#chr_edta_only
+length(chr_edta_only)   # how many unique to EDTA
+
+# Chromosomes only in Earl Grey
+chr_earl_only <- setdiff(earl_chr, edta_chr)
+#chr_earl_only
+length(chr_earl_only)   # how many unique to EarlGrey
+
+```
+
+
+
+
+```{r echo=FALSE}
+kable(
+  tibble(
+    category = c("Common", "EDTA only", "EarlGrey only"),
+    count = c(
+      length(common_chr),
+      length(chr_edta_only),
+      length(chr_earl_only)
+    )
+  ),
+  caption = "Chromosome Category Counts",
+  align = "lcr"
+) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+The analysis is based on all the chromosomes identified by both
+pipelines. In a first instance the most populated chromosome identified
+by each pipeline will be explored.
+
+```{r include=FALSE}
+# EDTA: TE count per chromosome
+edta_chr_counts <- edta %>%
+  as_tibble() %>%                     # <-- convert GRanges to tibble
+  count(seqnames, name = "TE_count") %>%
+  arrange(desc(TE_count))
+
+kable(edta_chr_counts,
+      caption = "EDTA – TE count per chromosome",
+      align = "lr") %>%
+  kable_styling(full_width = FALSE)
+
+# Most populated EDTA chromosome
+edta_top_chr <- edta_chr_counts[1, , drop = FALSE]
+
+
+```
+
+
+
+```{r include=FALSE}
+# Earl Grey: TE count per chromosome
+earl_chr_counts <- earlGrey %>%
+  count(seqnames, name = "TE_count") %>%
+  arrange(desc(TE_count))
+
+kable(earl_chr_counts,
+      caption = "Earl Grey – TE count per chromosome",
+      align = "lr") %>%
+  kable_styling(full_width = FALSE)
+
+# Most populated Earl Grey chromosome
+earl_top_chr <- edta_chr_counts[1, , drop = FALSE]
+kable(earl_top_chr,
+      caption = "Earl Grey – Most TE-populated chromosome",
+      align = "lr") %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+```{r echo=FALSE}
+edta_top_name <- edta_top_chr$seqnames[1]
+earl_top_name <- earl_top_chr$seqnames[1]
+
+edta_top_name
+earl_top_name
+
+```
+
+Both EDTA and Earl Grey identified the same chromosome as being the most
+populated, suggesting that both pipelines capture the most dense region
+of the genome in the same way. On this chromosome, EDTA identified 6283
+TEs while Earl Grey identified 7768 TEs. The overlap analysis follows:
+
+### Most populated Chromosome
+
+```{r include=FALSE}
+target_chr <- edta_top_name
+
+edta_chr <- edta %>% filter(seqnames == target_chr)
+earl_chr <- earlGrey %>% filter(seqnames == target_chr)
+```
+
+```{r include=FALSE}
+#. sanity check
+nrow(edta_chr)
+nrow(earl_chr)
+
+```
+
+```{r include=FALSE}
+# rows from both pipelines for the same chromosome are combined and another column for pipeline name is added in the combined dataset
+edta_chr2 <- edta_chr %>% mutate(pipeline = "EDTA")
+earl_chr2 <- earl_chr %>% mutate(pipeline = "EarlGrey")
+
+combined_chr <- bind_rows(edta_chr2, earl_chr2)
+
+```
+
+```{r echo=FALSE}
+
+ggplot(combined_chr) +
+  geom_segment(aes(
+    x = start, xend = end,
+    y = pipeline, yend = pipeline,
+    color = pipeline
+  ), size = 1, alpha = 0.7) +
+  labs(
+    title = paste("TE Distribution on ", target_chr),
+    x = "Genomic Position",
+    y = "Pipeline"
+  ) +
+  theme_bw()
+
+```
+
+```{r include=FALSE}
+
+gr_edta_chr <- GRanges(
+  seqnames = edta_chr$seqnames,
+  ranges = IRanges(start = edta_chr$start, end = edta_chr$end)
+)
+
+gr_earl_chr <- GRanges(
+  seqnames = earl_chr$seqnames,
+  ranges = IRanges(start = earl_chr$start, end = earl_chr$end)
+)
+
+ov_chr <- findOverlaps(gr_edta_chr, gr_earl_chr)
+
+```
+
+```{r include=FALSE}
+overlap_df_chr <- tibble(
+  edta_start = edta_chr$start[queryHits(ov_chr)],
+  edta_end   = edta_chr$end[queryHits(ov_chr)],
+  earl_start = earl_chr$start[subjectHits(ov_chr)],
+  earl_end   = earl_chr$end[subjectHits(ov_chr)]
+)
+
+
+overlap_df_chr
+```
+
+Given that zooming into the entire genome is not possible due to the
+size, for some parts of this analysis, zoomed in figures of sections of
+the chromosome will be provided while for other parts only
+numbers(mostly percentages) will be provided. The overlap analysis
+revealed that for chromosome AE013599.5 8353 TEs were found to overlap
+between EDTA and Earl Grey. These overlaps contain both 100% and partial
+overlaps.
+
+```{r echo=FALSE}
+ggplot(overlap_df_chr) +
+  geom_segment(aes(x = edta_start, xend = edta_end, y = 1, yend = 1),
+               color = "steelblue", size = 1.3, alpha = 0.7) +
+  geom_segment(aes(x = earl_start, xend = earl_end, y = 0, yend = 0),
+               color = "darkorange", size = 1.3, alpha = 0.7) +
+  scale_y_continuous(breaks = c(0, 1), labels = c("EarlGrey", "EDTA")) +
+  labs(
+    title = paste("Overlapping TEs on", target_chr),
+    x = "Genomic Position",
+    y = ""
+  ) +
+  theme_bw()
+
+```
+
+```{r include=FALSE}
+# Helper function for Track-style plot of TE positions for a given chromosome, wher "chr: is seqnames
+plot_chr <- function(chr) {
+  ed <- edta %>%
+    filter(seqnames == chr) %>%
+    mutate(pipeline = "EDTA")
+  
+  eg <- earlGrey %>%
+    filter(seqnames == chr) %>%
+    mutate(pipeline = "EarlGrey")
+  
+  combined <- bind_rows(ed, eg)
+  
+  ggplot(combined) +
+    geom_segment(aes(
+      x = start, xend = end,
+      y = pipeline, yend = pipeline,
+      color = pipeline
+    ), size = 1, alpha = 0.7) +
+    labs(
+      title = paste("TE Distribution on Chromosome", chr),
+      x = "Genomic Position",
+      y = "Pipeline"
+    ) +
+    theme_bw()
+}
+
+```
+
+```{r include=FALSE}
+# Helper function for overlap plot of EDTA vs EarlGrey for a given chromosome
+plot_chr_overlap <- function(chr) {
+  ed <- edta %>% filter(seqnames == chr)
+  eg <- earlGrey %>% filter(seqnames == chr)
+  
+  gr_ed <- GRanges(
+    seqnames = ed$seqnames,
+    ranges   = IRanges(start = ed$start, end = ed$end)
+  )
+  gr_eg <- GRanges(
+    seqnames = eg$seqnames,
+    ranges   = IRanges(start = eg$start, end = eg$end)
+  )
+  
+  ov <- findOverlaps(gr_ed, gr_eg)
+  
+  if (length(ov) == 0) {
+    message("No overlaps found on chromosome ", chr)
+    return(invisible(NULL))
+  }
+  
+  overlap_df <- tibble(
+    edta_start = ed$start[queryHits(ov)],
+    edta_end   = ed$end[queryHits(ov)],
+    earl_start = eg$start[subjectHits(ov)],
+    earl_end   = eg$end[subjectHits(ov)]
+  )
+  
+  ggplot(overlap_df) +
+    geom_segment(aes(x = edta_start, xend = edta_end, y = 0.52, yend = 0.52),
+                 color = "steelblue", size = 1.3, alpha = 0.8) +
+    geom_segment(aes(x = earl_start, xend = earl_end, y = 0.48, yend = 0.48),
+                 color = "darkorange", size = 1.3, alpha = 0.8) +
+    scale_y_continuous(
+      limits = c(0.45, 0.55),
+      breaks = c(0.48, 0.52),
+      labels = c("EarlGrey", "EDTA")
+    ) +
+    labs(
+      x = "Genomic Position",
+      y = ""
+    ) +
+    theme_bw()
+}
+
+```
+
+```{r echo=FALSE}
+
+zoom_start <- 30000
+zoom_end   <- 40000
+
+plot_chr_overlap(target_chr) +
+  coord_cartesian(xlim = c(zoom_start, zoom_end)) +
+  labs(
+    x = "Genomic Position",
+    y = ""
+  )
+  
+
+```
+
+The zoomed-in comparison of EDTA and Earl Grey annotations on chromosome
+AE013599.5 shows that both pipelines detect transposable elements within
+the same genomic intervals, demonstrating strong agreement about where
+TE activity occurs in this region. However, the boundaries and lengths
+of their predictions differ.
+
+EDTA produces several shorter, more fragmented annotations, reflecting
+its structural detection strategy, which identifies cleanly delimited
+elements but tends to split copies when termini are disrupted or when
+partial domains are present.
+
+In contrast, Earl Grey frequently reports longer, more continuous
+intervals, consistent with its homology-based expansion of TE families,
+which captures broader footprints that may include truncated, degraded,
+or fused remnants of older insertions. The pipelines therefore agree on
+the location of TE-rich locations but differ in how they construct
+element boundaries.
+
+This regional pattern shows the genome-wide trends observed in TE length
+distributions, truncation patterns, and identity variation, highlighting
+how structural and homology-driven methods provide complementary but not
+identical representations of TE content.
+
+### Summary Statistics for the most populated Chromosome
+
+```{r kables, echo=FALSE}
+
+chr <- target_chr
+
+# 1. Subset chromosome data
+
+ed_chr <- edta %>% filter(seqnames == chr)
+eg_chr <- earlGrey %>% filter(seqnames == chr)
+
+
+# 2. Basic TE counts
+
+ed_count <- nrow(ed_chr)
+eg_count <- nrow(eg_chr)
+
+
+# 3. Length statistics
+
+ed_lengths <- ed_chr$end - ed_chr$start + 1
+eg_lengths <- eg_chr$end - eg_chr$start + 1
+
+length_stats <- tibble(
+  Pipeline = c("EDTA", "EarlGrey"),
+  Count = c(ed_count, eg_count),
+  Mean_Length = c(mean(ed_lengths), mean(eg_lengths)),
+  Median_Length = c(median(ed_lengths), median(eg_lengths)),
+  Min_Length = c(min(ed_lengths), min(eg_lengths)),
+  Max_Length = c(max(ed_lengths), max(eg_lengths)),
+  Total_BP = c(sum(ed_lengths), sum(eg_lengths))
+)
+
+
+# 4. Coverage-based overlap (Jaccard similarity)
+
+gr_ed <- GRanges(
+  seqnames = ed_chr$seqnames,
+  ranges   = IRanges(ed_chr$start, ed_chr$end)
+)
+
+gr_eg <- GRanges(
+  seqnames = eg_chr$seqnames,
+  ranges   = IRanges(eg_chr$start, eg_chr$end)
+)
+
+# Use GenomicRanges::reduce explicitly to avoid purrr::reduce
+gr_ed_red <- GenomicRanges::reduce(gr_ed)
+gr_eg_red <- GenomicRanges::reduce(gr_eg)
+
+# Total coverage (bp) per pipeline
+cov_ed <- sum(IRanges::width(gr_ed_red))
+cov_eg <- sum(IRanges::width(gr_eg_red))
+
+# Overlapping coverage: intersect reduced ranges
+gr_ov   <- GenomicRanges::intersect(gr_ed_red, gr_eg_red)
+ov_cov  <- sum(IRanges::width(gr_ov))
+
+# Jaccard index based on coverage
+jaccard <- ov_cov / (cov_ed + cov_eg - ov_cov)
+
+
+
+# 5. Boundary deviation summary
+
+hits <- findOverlaps(gr_ed, gr_eg)
+
+boundary_df <- tibble(
+  ed_start = start(gr_ed)[queryHits(hits)],
+  ed_end   = end(gr_ed)[queryHits(hits)],
+  eg_start = start(gr_eg)[subjectHits(hits)],
+  eg_end   = end(gr_eg)[subjectHits(hits)],
+  Start_Diff = abs(start(gr_ed)[queryHits(hits)] -
+                     start(gr_eg)[subjectHits(hits)]),
+  End_Diff = abs(end(gr_ed)[queryHits(hits)] -
+                   end(gr_eg)[subjectHits(hits)])
+)
+
+boundary_stats <- boundary_df %>% 
+  summarise(
+    Mean_Start_Diff = mean(Start_Diff),
+    Median_Start_Diff = median(Start_Diff),
+    Mean_End_Diff = mean(End_Diff),
+    Median_End_Diff = median(End_Diff)
+  )
+
+
+# 6. Generate output tables
+
+kable(length_stats, caption = paste("Length and Coverage Statistics for", chr)) %>%
+  kable_styling(full_width = FALSE)
+
+kable(
+  tibble(
+    Chromosome = chr,
+    EDTA_Coverage = cov_ed,
+    EarlGrey_Coverage = cov_eg,
+    Overlapping_BP = ov_cov,
+    Jaccard_Similarity = jaccard
+  ),
+  caption = paste("Coverage Overlap Summary for", chr)
+) %>%
+  kable_styling(full_width = FALSE)
+
+kable(boundary_stats, caption = paste("Boundary Differences Between Pipelines on", chr)) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+```{r echo=FALSE}
+
+# 4b. Percentage coverage per pipeline
+
+# Approximate chromosome length as max end coordinate seen in either pipeline
+chr_len <- max(c(ed_chr$end, eg_chr$end), na.rm = TRUE)
+
+perc_ed <- (cov_ed / chr_len) * 100
+perc_eg <- (cov_eg / chr_len) * 100
+
+coverage_pct_tbl <- tibble(
+  Chromosome = chr,
+  Pipeline   = c("EDTA", "EarlGrey"),
+  Coverage_bp = c(cov_ed, cov_eg),
+  Chromosome_Length_bp = chr_len,
+  Coverage_percent = c(perc_ed, perc_eg)
+)
+
+kable(coverage_pct_tbl,
+      caption = paste("Percentage TE Coverage per Pipeline on", chr),
+      digits = 3,
+      align = "lrrrc") %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+Across this chromosome, EDTA reported fewer TEs than Earl Grey and
+produced consistently shorter annotations. EDTA exhibited a lower mean
+TE length, a smaller maximum TE length, and reduced total TE base pair
+coverage compared with Earl Grey. The percentage of the chromosome
+annotated as TE was also lower for EDTA. These combined metrics indicate
+that Earl Grey detects a greater quantity of TE-derived sequence and
+annotates longer intervals overall, whereas EDTA captures a smaller set
+of typically shorter elements(possibly more intact TEs due to structural
+identification). This suggests that Earl Grey has greater sensitivity in
+terms of completeness of the TEs while EDTA tends to identify more
+intact and new(young) TEs.
+
+EDTA is more conservative and structurally precise, whereas Earl Grey is
+more inclusive and sensitive. They complement each other rather than
+outperform each other.
+
+***Jaccard Index***
+
+The similarity between EDTA and Earl Grey TE annotations on this
+chromosome was quantified using the Jaccard index, a measure of the
+overlap between two sets. For this chromosome, the two pipelines
+exhibited a Jaccard index of 0.69, indicating a high degree of shared TE
+coverage. This value shows that approximately 69 percent of the combined
+TE-annotated sequence is detected by both methods, reflecting
+substantial positional agreement despite clear differences in TE
+lengths, boundaries, and the number of elements reported by each
+pipeline.
+
+```{r most_pop_chr_overlap, include=FALSE}
+
+gr_ed <- GRanges(
+  seqnames = ed_chr$seqnames,
+  ranges   = IRanges(start = ed_chr$start, end = ed_chr$end)
+)
+
+gr_eg <- GRanges(
+  seqnames = eg_chr$seqnames,
+  ranges   = IRanges(start = eg_chr$start, end = eg_chr$end)
+)
+
+hits <- ov <- findOverlaps(gr_ed, gr_eg)
+
+
+```
+
+```{r include=FALSE}
+# Obtaining classes for exact matches
+
+overlap_df <- tibble(
+  edta_index     = queryHits(ov),
+  earlgrey_index = subjectHits(ov),
+  edta_start     = ed_chr$start[edta_index],
+  edta_end       = ed_chr$end[edta_index],
+  earlgrey_start = eg_chr$start[earlgrey_index],
+  earlgrey_end   = eg_chr$end[earlgrey_index]
+) %>%
+  mutate(
+    edta_len      = edta_end - edta_start + 1,
+    earlgrey_len  = earlgrey_end - earlgrey_start + 1,
+    overlap_start = pmax(edta_start, earlgrey_start),
+    overlap_end   = pmin(edta_end,   earlgrey_end),
+    overlap_len   = overlap_end - overlap_start + 1,
+    percentage_EDTA = (overlap_len / edta_len) * 100,
+    percentage_EG   = (overlap_len / earlgrey_len) * 100
+  )
+
+```
+
+```{r include=FALSE}
+head(overlap_df)
+```
+
+***TEs with exact match ie the same TE was identified by both Earl Grey
+and EDTA*** 
+
+318 TEs were found to overlap completely.
+
+```{r include=FALSE}
+exact_matches <- overlap_df %>%
+  filter(percentage_EG == 100, percentage_EDTA == 100)
+
+dim(exact_matches)
+```
+
+```{r include=FALSE}
+unique(edta$classification)
+```
+
+
+
+```{r include=FALSE}
+exact_matches_class <- exact_matches %>%
+  mutate(
+    ED_class = ed_chr$class[edta_index],
+    ED_order = ed_chr$order[edta_index],
+    ED_super = ed_chr$superfamily[edta_index],
+
+    EG_class = eg_chr$class[earlgrey_index],
+    EG_order = eg_chr$order[earlgrey_index],
+    EG_super = eg_chr$superfamily[earlgrey_index]
+  ) %>%
+  mutate(
+    class_match       = ED_class == EG_class,
+    order_match       = ED_order == EG_order,
+    superfamily_match = ED_super == EG_super
+  )
+
+
+```
+
+```{r include=FALSE}
+nrow(exact_matches)
+```
+
+```{r include=FALSE}
+edta2 <- edta
+
+```
+
+```{r include=FALSE}
+earl2 <- earlGrey
+
+```
+
+```{r include=FALSE}
+# Adding the classification
+exact_matches_class <- exact_matches %>%
+  mutate(
+    ED_class = edta2$class[edta_index],
+    ED_order = edta2$order[edta_index],
+    ED_super = edta2$superfamily[edta_index],
+
+    EG_class = earl2$class[earlgrey_index],
+    EG_order = earl2$order[earlgrey_index],
+    EG_super = earl2$superfamily[earlgrey_index]
+  ) %>%
+  mutate(
+    class_match = ED_class == EG_class,
+    order_match = ED_order == EG_order,
+    superfamily_match = ED_super == EG_super
+  )
+
+```
+
+The following table summarises the agreement level of the exact match TE
+classification by EDTA and Earl Grey.
+
+```{r echo=FALSE}
+agreement_summary <- tibble(
+  Level = c("Class", "Order", "Superfamily"),
+  Matches = c(
+    sum(exact_matches_class$class_match, na.rm = TRUE),
+    sum(exact_matches_class$order_match, na.rm = TRUE),
+    sum(exact_matches_class$superfamily_match, na.rm = TRUE)
+  ),
+  Total = nrow(exact_matches_class),
+  Percent = round(100 * Matches / Total, 2)
+)
+
+
+
+kable(
+  agreement_summary,
+  caption = "Agreement Between Pipelines for Exact Overlapping TEs",
+  align = "lrrr"
+) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+Across the 447 exact positional matches between EDTA and Earl Grey, most
+transposable elements were placed into the same broad categories by both
+pipelines. About 91$%$ of these elements were assigned to the same TE
+class, showing strong agreement at the highest level of classification.
+Agreement was slightly lower at the order level, with around 89$%$ of
+matched elements receiving the same order label. However, at the
+superfamily level, agreement dropped to 66$%$, meaning that almost half
+of the elements were given different or more specific superfamily names
+by the two pipelines. There are 850 exact matches. This pattern shows
+that the two methods agree well on broad classifications, but diverge
+more as classifications become more detailed, likely because each
+pipeline handles ambiguous, partial, or degraded elements differently.
+
+```{r include=FALSE}
+# adding other attributes for further comparison
+exact_matches_attr <- exact_matches_class %>%
+  mutate(
+    ED_score        = ed_chr$score[edta_index],
+    ED_width        = ed_chr$width[edta_index],
+    ED_identity     = ed_chr$identity[edta_index],
+    ED_ltr_identity = ed_chr$ltr_identity[edta_index],
+    EG_score        = eg_chr$score[earlgrey_index],
+    EG_width        = eg_chr$width[earlgrey_index],
+    EG_KIMURA80     = eg_chr$KIMURA80[earlgrey_index]
+  )
+
+
+```
+
+```{r include=FALSE}
+exact_matches_attr %>%
+  select(edta_index, earlgrey_index,
+         ED_score, EG_score,
+         ED_width, EG_width,
+         ED_identity, ED_ltr_identity, EG_KIMURA80) %>%
+  head() %>%
+  kable(caption = "Exact matches with scores, widths, and age proxies") %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+```{r include=FALSE}
+perfect_match <- exact_matches_attr %>%
+  filter(class_match & order_match & superfamily_match)
+
+perfect_match %>%
+  select(edta_index, earlgrey_index,
+         ED_class, ED_order, ED_super,
+         ED_score, EG_score,
+         ED_width, EG_width,
+         ED_identity, ED_ltr_identity, EG_KIMURA80) %>%
+  head() %>%
+  kable(caption = "Exact positional + classification matches with attributes") %>%
+  kable_styling(full_width = FALSE)
+
+
+```
+
+```{r}
+exact_all_match <- exact_matches_attr %>%
+  filter(class_match, order_match, superfamily_match)
+
+```
+
+```{r include=FALSE}
+head(perfect_match)
+```
+
+```{r echo=FALSE}
+width_long <- perfect_match %>%
+  select(ED_width, EG_width) %>%
+  pivot_longer(cols = everything(),
+               names_to = "pipeline",
+               values_to = "width") %>%
+  mutate(pipeline = recode(pipeline,
+                           ED_width = "EDTA",
+                           EG_width = "Earl Grey"))
+
+ggplot(width_long, aes(x = width, fill = pipeline)) +
+  geom_histogram(alpha = 0.6, bins = 50, position = "identity") +
+  labs(
+    title = "TE width distribution for exact matches",
+    x = "Width (bp)",
+    y = "Count",
+    fill = "Pipeline"
+  ) +
+  theme_bw()
+
+```
+
+Only one color appears as the width in both pipelines are exact matches.
+The TE width distribution shows that exact-match elements, fall between
+100–500 bp, and the counts rapidly declining as width increases. A small
+number of longer elements extend up to several kilobases, producing a
+long right-skewed tail characteristic of mixed fragmented and
+full-length TEs.
+
+```{r echo=FALSE}
+score_long <- perfect_match %>%
+  select(ED_score, EG_score) %>%
+  pivot_longer(cols = everything(),
+               names_to = "pipeline",
+               values_to = "score") %>%
+  mutate(pipeline = recode(pipeline,
+                           ED_score = "EDTA",
+                           EG_score = "Earl Grey"))
+
+ggplot(score_long, aes(x = score, fill = pipeline)) +
+  geom_histogram(alpha = 0.6, bins = 50, position = "identity") +
+  labs(
+    title = "TE score distribution for exact matches",
+    x = "Score",
+    y = "Count",
+    fill = "Pipeline"
+  ) +
+  theme_bw()
+
+```
+
+```{r echo=FALSE}
+ggplot(perfect_match) +
+  geom_density(aes(x = ED_score, color="EDTA"), size=1.2) +
+  geom_density(aes(x = EG_score, color="EarlGrey"), size=1.2) +
+  scale_color_manual(values=c("EDTA"="steelblue","EarlGrey"="darkorange")) +
+  labs(title="Score Distribution of Exact Matches",
+       x="TE Score", color="Pipeline") +
+  theme_bw()
+
+```
+
+The score distribution for exact matches is very right-skewed, with most
+TE scores being low and only a few very high. Earl Grey and EDTA show
+almost the same curve, meaning they give similar scores when they find
+exact matches. Only a small number of TEs receive high scores, so strong
+exact matches are uncommon in both pipelines.
+
+```{r echo=FALSE}
+combined <- perfect_match %>%
+  select(ED_identity, ED_ltr_identity, EG_KIMURA80) %>%
+  pivot_longer(cols = everything(),
+               names_to = "metric",
+               values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  mutate(metric = recode(metric,
+    ED_identity     = "EDTA homology identity",
+    ED_ltr_identity = "EDTA LTR structural identity",
+    EG_KIMURA80     = "Earl Grey KIMURA80 divergence"
+  ))
+
+ggplot(combined, aes(x = value, fill = metric)) +
+  geom_histogram(alpha = 0.5, bins = 50, position = "identity") +
+  labs(
+    title = "Identity and Divergence Distributions for Exact Matches",
+    x = "Value",
+    y = "Count",
+    fill = "Metric"
+  ) +
+  theme_bw()
+
+```
+
+The plot reveals that the scores for both pipeline:
+
+\begin{itemize}
+\item Earl Grey’s overlapping TEs exhibit low divergence (mostly 0 to 0.3), indicating they are highly similar and likely represent relatively young insertions.
+\item EDTA’s homology identity values span moderately high similarity (approximately 0.65 to 0.95), capturing both intact and partially degraded elements.
+\item EDTA’s LTR structural identity is concentrated near 1.0, demonstrating that the subset of elements with recognized LTR structure are highly intact.
+\end{itemize}
+
+Overall, these distributions indicate that the TEs for which both
+pipelines agree perfectly in genomic location tend to be young and
+well-preserved elements.
+
+Both EDTA and Earl Grey are highly consistent when TE structure and
+similarity are largely intact, whereas older or more fragmented elements
+show reduced agreement between the pipelines.
+
+```{r}
+chr_summary_main <- tibble(
+  Pipeline = c("EDTA", "EarlGrey"),
+  TE_count = c(ed_count, eg_count),
+  Total_TE_bp = c(cov_ed, cov_eg),
+  Mean_TE_length = c(mean(ed_lengths), mean(eg_lengths)),
+  Jaccard = c(jaccard, jaccard)
+)
+
+kable(
+  chr_summary_main,
+  caption = paste("Summary statistics for the most TE-rich chromosome (", chr, ")", sep = ""),
+  align = "lrrrr"
+) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+
+
+## Overlap analysis for Chromosmes common to both EDTA and Earl Grey
+
+1388 chromosmes were identified by both EDTA and Earl Grey.
+
+```{r helper function, include=FALSE}
+# helper function
+summarise_chr_overlap <- function(chr) {
+  
+  # Subset both annotation sets for the chromosome
+  ed_chr <- edta2 %>% filter(seqnames == chr)
+  eg_chr <- earl2 %>% filter(seqnames == chr)
+  
+  # Edge case: if one pipeline has no TEs here
+  if (nrow(ed_chr) == 0 | nrow(eg_chr) == 0) {
+    return(tibble(
+      Chromosome        = chr,
+      EDTA_Count        = nrow(ed_chr),
+      EG_Count          = nrow(eg_chr),
+      EDTA_Cov_bp       = NA_real_,
+      EG_Cov_bp         = NA_real_,
+      Overlap_bp        = NA_real_,
+      Jaccard           = NA_real_,
+      EDTA_Mean_Length  = NA_real_,
+      EG_Mean_Length    = NA_real_
+    ))
+  }
+  
+  # Construct GRanges
+  gr_ed <- GRanges(chr, ranges = IRanges(ed_chr$start, ed_chr$end))
+  gr_eg <- GRanges(chr, ranges = IRanges(eg_chr$start, eg_chr$end))
+  
+  # Reduced ranges = unique coverage per pipeline
+  gr_ed_red <- GenomicRanges::reduce(gr_ed)
+  gr_eg_red <- GenomicRanges::reduce(gr_eg)
+  
+  # Coverage amounts (in bp)
+  cov_ed <- sum(width(gr_ed_red))
+  cov_eg <- sum(width(gr_eg_red))
+  
+  # Intersection of reduced ranges
+  gr_ov <- GenomicRanges::intersect(gr_ed_red, gr_eg_red)
+  ov_cov <- sum(width(gr_ov))
+  
+  # Jaccard index
+  jaccard <- ov_cov / (cov_ed + cov_eg - ov_cov)
+  
+  tibble(
+    Chromosome        = chr,
+    EDTA_Count        = nrow(ed_chr),
+    EG_Count          = nrow(eg_chr),
+    EDTA_Cov_bp       = cov_ed,
+    EG_Cov_bp         = cov_eg,
+    Overlap_bp        = ov_cov,
+    Jaccard           = jaccard,
+    EDTA_Mean_Length  = mean(ed_chr$width),
+    EG_Mean_Length    = mean(eg_chr$width)
+  )
+}
+```
+
+```{r include=FALSE}
+chr_overlap_summary <- map_dfr(common_chr, summarise_chr_overlap)
+
+```
+
+```{r}
+kable(chr_overlap_summary,
+      caption = "Genome-wide Per-Chromosome TE Overlap Summary",
+      digits = 3) %>%
+  kable_styling(full_width = FALSE)
+```
+
+On average, Earl Grey identified more TEs than EDTA, bp coverage was
+higher for EARL Grey, longer mean length as well.
+
+```{r Jaccard distribution, echo=FALSE}
+
+ggplot(chr_overlap_summary, aes(x = Jaccard)) +
+  geom_histogram(bins = 20, fill = "steelblue", alpha = 0.7, color = "black") +
+  labs(
+    x = "Jaccard Similarity",
+    y = "Number of Chromosomes"
+  ) +
+  theme_bw()
+
+```
+
+Out of the 1345 common chromosomes, 1156 of them had a Jaccard index
+greater than $0.5$ and 1077 had an index greater then $0.6$ suggesting a
+strong agreement between the results produced by both pipelines in most
+chromosomes.
+
+```{r include=FALSE}
+sum(chr_overlap_summary$Jaccard > 0.6, na.rm = TRUE)
+
+```
+
+```{r count distribution, echo=FALSE}
+
+# Prepare data in long format
+counts_long <- chr_overlap_summary %>%
+  select(Chromosome, EDTA_Count, EG_Count) %>%
+  pivot_longer(cols = c(EDTA_Count, EG_Count),
+               names_to = "Pipeline",
+               values_to = "Count") %>%
+  mutate(Pipeline = recode(Pipeline,
+                           EDTA_Count = "EDTA",
+                           EG_Count   = "EarlGrey"))
+
+# Density plot (log10 scale)
+ggplot(counts_long, aes(x = Count, color = Pipeline, fill = Pipeline)) +
+  geom_density(alpha = 0.3, linewidth = 1.1) +
+  scale_x_log10() +
+  labs(
+    title = "Density of TE Counts per Chromosome",
+    x = "TE Count (log10 scale)",
+    y = "Density"
+  ) +
+  theme_bw()
+
+
+```
+
+The above plot suggests that most chromosomes contain little TEs
+identified(higher peaks), which are tiny contigs. This corresponds to
+what I have found about the euchromatic and heterochromatic regions in
+the genome. The flatter line with higher counts correspond to the
+euchromatic regions.
+
+```{r bp coverage, echo=FALSE}
+cov_long <- chr_overlap_summary %>%
+  select(Chromosome, EDTA_Cov_bp, EG_Cov_bp) %>%
+  pivot_longer(cols = c(EDTA_Cov_bp, EG_Cov_bp),
+               names_to = "Pipeline",
+               values_to = "Coverage_bp") %>%
+  mutate(Pipeline = recode(Pipeline,
+                           EDTA_Cov_bp = "EDTA",
+                           EG_Cov_bp   = "EarlGrey"))
+
+ggplot(cov_long, aes(x = Coverage_bp, color = Pipeline, fill = Pipeline)) +
+  geom_density(alpha = 0.3, linewidth = 1.1) +
+  scale_x_log10() +
+  labs(
+    title = "Density of TE Basepair Coverage per Chromosome",
+    x = "TE Coverage (bp, log10 scale)",
+    y = "Density"
+  ) +
+  theme_bw()
+
+```
+
+The distribution of TE basepair coverage per scaffold shows a dominant
+peak near 1 kb for both pipelines, reflecting thousands of small
+scaffolds with minimal TE content. However, Earl Grey consistently
+exhibits a heavier right tail, indicating greater TE recovery on large
+chromosomes. This is consistent with its homology-based detection of
+fragmented or degraded TE sequences that EDTA frequently excludes. The
+extreme right tail corresponds to the major chromosomes, which contain
+extensive TE-rich heterochromatin.
+
+```{r mean length, echo=FALSE}
+len_long <- chr_overlap_summary %>%
+  select(Chromosome, EDTA_Mean_Length, EG_Mean_Length) %>%
+  pivot_longer(cols = c(EDTA_Mean_Length, EG_Mean_Length),
+               names_to = "Pipeline",
+               values_to = "Mean_Length") %>%
+  mutate(Pipeline = recode(Pipeline,
+                           EDTA_Mean_Length = "EDTA",
+                           EG_Mean_Length   = "EarlGrey"))
+
+ggplot(len_long, aes(x = Mean_Length, color = Pipeline, fill = Pipeline)) +
+  geom_density(alpha = 0.3, linewidth = 1.1) +
+  labs(
+    title = "Density of Mean TE Length per Chromosome",
+    x = "Mean TE Length (bp)",
+    y = "Density"
+  ) +
+  theme_bw()
+
+```
+
+```{r include=FALSE}
+ggplot(len_long, aes(x = Mean_Length, color = Pipeline, fill = Pipeline)) +
+  geom_density(alpha = 0.3, linewidth = 1.1) +
+  coord_cartesian(xlim = c(1500, 7000)) +
+  labs(
+    title = "Density of Mean TE Length (Zoomed Further into Tail)",
+    x = "Mean TE Length (bp)",
+    y = "Density"
+  ) +
+  theme_bw()
+
+```
+
+EDTA tends to annotate shorter and newer TE fragments.Earl Grey produces
+systematically longer TE calls, especially on larger scaffolds and
+chromosomes.
+
+```{r overall overlap, echo=FALSE}
+ggplot(chr_overlap_summary, aes(x = Overlap_bp)) +
+  geom_density(fill = "darkolivegreen3", alpha = 0.4, linewidth = 1.1) +
+  scale_x_log10() +
+  labs(
+    title = "Density of Overlapping TE Coverage per Chromosome",
+    x = "Overlap Coverage (bp, log10 scale)",
+    y = "Density"
+  ) +
+  theme_bw()
+
+```
+
+Most scaffolds exhibit modest overlapping TE coverage, reflecting short,
+isolated TE fragments that both pipelines detect consistently. A smaller
+subset of longer scaffolds and full chromosomes contributes to the
+extended right tail, reaching up to about 1 Mb of overlapping TE
+sequence. This indicates substantial agreement between EDTA and EarlGrey
+in TE rich genomic regions, particularly within heterochromatic blocks
+and major chromosome arms.
+
+```{r include=FALSE}
+
+# Build GRanges objects for the entire genome
+gr_ed_all <- GRanges(
+  seqnames = edta2$seqnames,
+  ranges   = IRanges(start = edta2$start, end = edta2$end)
+)
+
+gr_eg_all <- GRanges(
+  seqnames = earl2$seqnames,
+  ranges   = IRanges(start = earl2$start, end = earl2$end)
+)
+
+```
+
+```{r include=FALSE}
+ov_all <- findOverlaps(gr_ed_all, gr_eg_all)
+
+```
+
+```{r include=FALSE}
+overlap_all_df <- tibble(
+  ed_index = queryHits(ov_all),
+  eg_index = subjectHits(ov_all),
+  
+  seqnames = edta2$seqnames[ed_index],
+  
+  ed_start = edta2$start[ed_index],
+  ed_end   = edta2$end[ed_index],
+  eg_start = earl2$start[eg_index],
+  eg_end   = earl2$end[eg_index]
+) %>%
+  mutate(
+    ed_len = ed_end - ed_start + 1,
+    eg_len = eg_end - eg_start + 1,
+    
+    overlap_start = pmax(ed_start, eg_start),
+    overlap_end   = pmin(ed_end, eg_end),
+    overlap_len   = pmax(0, overlap_end - overlap_start + 1),
+    
+    pct_ed = 100 * overlap_len / ed_len,
+    pct_eg = 100 * overlap_len / eg_len,
+    
+    # TE classification added here
+    ed_class = edta2$class[ed_index],
+    ed_order = edta2$order[ed_index],
+    ed_super = edta2$superfamily[ed_index],
+    
+    eg_class = earl2$class[eg_index],
+    eg_order = earl2$order[eg_index],
+    eg_super = earl2$superfamily[eg_index],
+    
+    # EDTA-only attributes
+    ed_score = edta2$score[ed_index],
+    ed_identity = edta2$identity[ed_index],
+    ed_ltr_identity = edta2$ltr_identity[ed_index],
+    
+    # EarlGrey-only attributes
+    eg_score = earl2$score[eg_index],
+    eg_divergence = earl2$KIMURA80[eg_index]
+  )
+
+```
+
+```{r main overlap, include=FALSE}
+nrow(overlap_all_df)
+summary(overlap_all_df$pct_ed)
+summary(overlap_all_df$pct_eg)
+table(overlap_all_df$seqnames)
+
+```
+
+```{r include=FALSE}
+head(overlap_all_df)
+
+```
+
+#### Agreement Indices
+
+```{r include=FALSE}
+exact_all <- overlap_all_df %>%
+  filter(pct_ed == 100, pct_eg == 100)
+
+nrow(exact_all)
+
+```
+
+```{r higher confidence matches, include=FALSE}
+high_overlap <- overlap_all_df %>%
+  filter(pct_ed >= 80, pct_eg >= 80)
+
+```
+
+```{r helper function for Cohen, echo=FALSE}
+compute_cohen_kappa <- function(df, col_ed, col_eg) {
+  tmp <- df %>%
+    select({{col_ed}}, {{col_eg}}) %>%
+    mutate(
+      across(everything(), ~factor(.x))
+    )
+  irr::kappa2(tmp)
+}
+
+# CLASS level
+kappa_class <- compute_cohen_kappa(exact_all, ed_class, eg_class)
+
+# ORDER level
+kappa_order <- compute_cohen_kappa(exact_all, ed_order, eg_order)
+
+# SUPERFAMILY level
+kappa_super <- compute_cohen_kappa(exact_all, ed_super, eg_super)
+
+kappa_class
+kappa_order
+kappa_super
+
+```
+
+All kappa statistics were highly significant (p $<$ 0.001), reflecting
+the large number of paired annotations (n = 1664). EDTA and Earl Grey
+show strong agreement at the order level (K = 0.794), moderate agreement
+at the superfamily level (K = 0.424), and fair agreement at the class
+level (K = 0.367).
+
+```{r include=FALSE}
+exact_super <- exact_all %>%
+  filter(!is.na(ed_super), !is.na(eg_super))
+
+```
+
+
+
+```{r echo=FALSE}
+agreement_summary <- tibble(
+  Level = c("Class", "Order", "Superfamily"),
+  N_pairs = nrow(exact_all),
+  Percent_agreement = c(
+    mean(exact_all$ed_class == exact_all$eg_class, na.rm = TRUE) * 100,
+    mean(exact_all$ed_order == exact_all$eg_order, na.rm = TRUE) * 100,
+    mean(exact_all$ed_super == exact_all$eg_super, na.rm = TRUE) * 100
+  ),
+  Cohen_kappa = c(
+    kappa_class$value,
+    kappa_order$value,
+    kappa_super$value
+  )
+)
+```
+
+```{r echo=FALSE}
+
+kable(agreement_summary,
+      caption = "Agreement Between EDTA and EarlGrey for Exact Positional Matches",
+      digits = 3) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+Fleis Kappa expects 3 raters but in this case we have only 2(Earl Grey
+and EDTA). Hence the Cohen Kappa coefficient was calculated instead.
+Agreement is highest for order.
+
+#### Diversity Indices
+```{r helper_remove_unknown, include=FALSE}
+
+# 1) Restrict to common seqnames
+common_seq <- intersect(unique(edta2$seqnames), unique(earl2$seqnames))
+
+edta_common <- edta2 %>% filter(seqnames %in% common_seq)
+earl_common <- earl2 %>% filter(seqnames %in% common_seq)
+
+# 2) Remove Unknown at ANY level (strict)
+unknown_labels <- c("Unknown", "unknown", "UNKNOWN", NA, "")
+
+remove_unknown_all_levels <- function(data) {
+  data %>%
+    filter(
+      !(class %in% unknown_labels),
+      !(order %in% unknown_labels),
+      !(superfamily %in% unknown_labels)
+    )
+}
+
+edta_common_noUnknown <- remove_unknown_all_levels(edta_common)
+earl_common_noUnknown <- remove_unknown_all_levels(earl_common)
+
+# 3) Compute diversity on those filtered datasets
+div_edta_strict <- bind_rows(
+  compute_diversity(edta_common_noUnknown, "class"),
+  compute_diversity(edta_common_noUnknown, "order"),
+  compute_diversity(edta_common_noUnknown, "superfamily")
+) %>% mutate(Pipeline = "EDTA")
+
+div_eg_strict <- bind_rows(
+  compute_diversity(earl_common_noUnknown, "class"),
+  compute_diversity(earl_common_noUnknown, "order"),
+  compute_diversity(earl_common_noUnknown, "superfamily")
+) %>% mutate(Pipeline = "EarlGrey")
+
+diversity_common_noUnknown <- bind_rows(div_edta_strict, div_eg_strict)
+
+```
+
+
+```{r table_diversity_strict_noUnknown, echo=FALSE}
+
+
+kable(diversity_noUnknown_allLevels,
+      caption = "TE diversity metrics after excluding annotations labelled as Unknown at class, order, or superfamily level") %>%
+  kable_styling(full_width = FALSE)
+```
+
+
+```{r diversity_no_unknown, include=FALSE}
+
+div_edta_noUnknown <- bind_rows(
+  compute_diversity(remove_unknown(edta2, "class"), "class"),
+  compute_diversity(remove_unknown(edta2, "order"), "order"),
+  compute_diversity(remove_unknown(edta2, "superfamily"), "superfamily")
+) %>% mutate(Pipeline = "EDTA")
+
+div_eg_noUnknown <- bind_rows(
+  compute_diversity(remove_unknown(earl2, "class"), "class"),
+  compute_diversity(remove_unknown(earl2, "order"), "order"),
+  compute_diversity(remove_unknown(earl2, "superfamily"), "superfamily")
+) %>% mutate(Pipeline = "EarlGrey")
+
+diversity_noUnknown <- bind_rows(div_edta_noUnknown, div_eg_noUnknown)
+```
+
+
+
+```{r table_diversity_noUnknown, echo=FALSE}
+
+kable(diversity_noUnknown,
+      caption = "TE Diversity Metrics for EDTA and Earl Grey After Removing Unclassified (Unknown) Annotations") %>%
+  kable_styling(full_width = FALSE)
+```
+
+
+
+```{r unknown_removed_counts, echo=FALSE}
+
+unknown_summary <- tibble(
+  Level = c("class","order","superfamily"),
+  EDTA_removed = c(
+    sum(edta2$class == "Unknown", na.rm=TRUE),
+    sum(edta2$order == "Unknown", na.rm=TRUE),
+    sum(edta2$superfamily == "Unknown", na.rm=TRUE)
+  ),
+  EarlGrey_removed = c(
+    sum(earl2$class == "Unknown", na.rm=TRUE),
+    sum(earl2$order == "Unknown", na.rm=TRUE),
+    sum(earl2$superfamily == "Unknown", na.rm=TRUE)
+  )
+)
+
+kable(unknown_summary,
+      caption = "Number of annotations excluded as Unknown at each classification level") %>%
+  kable_styling(full_width = FALSE)
+```
+
+
+```{r diversity per chromosome, echo=FALSE}
+compute_chr_div <- function(data, level) {
+  data %>%
+    group_by(seqnames) %>%
+    summarise(
+      Richness = vegan::specnumber(table(.data[[level]])),
+      Shannon  = vegan::diversity(table(.data[[level]]), index = "shannon"),
+      Simpson  = vegan::diversity(table(.data[[level]]), index = "simpson"),
+      Evenness = Shannon / log(Richness),
+      n = n(),
+      .groups = "drop"
+    ) %>%
+    mutate(Level = level)
+}
+
+chr_div_edta <- bind_rows(
+  compute_chr_div(edta2, "class"),
+  compute_chr_div(edta2, "order"),
+  compute_chr_div(edta2, "superfamily")
+) %>% mutate(Pipeline = "EDTA")
+
+chr_div_eg <- bind_rows(
+  compute_chr_div(earl2, "class"),
+  compute_chr_div(earl2, "order"),
+  compute_chr_div(earl2, "superfamily")
+) %>% mutate(Pipeline = "EarlGrey")
+
+chr_diversity <- bind_rows(chr_div_edta, chr_div_eg)
+
+```
+
+```{r include=FALSE}
+kable(chr_diversity,
+      caption = "Per chromosome TE Diversity Metrics for EDTA and Earl Grey") %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+```{r include=FALSE}
+ggplot(chr_diversity, aes(x = seqnames, y = Shannon,
+                          fill = Pipeline)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~Level, scales = "free_y") +
+  theme_bw() +
+  labs(title = "Shannon Diversity per Chromosome",
+       x = "Chromosome",
+       y = "Shannon")
+
+```
+
+A paired wilcoxon test was used to test whether diversity differs between
+both pipelines. The test revealed there is indeed a difference in
+diversity between the results(p.values $<$ 0.05)
+
+```{r echo=FALSE}
+
+common_chrs <- intersect(
+  chr_diversity %>% filter(Pipeline == "EDTA") %>% pull(seqnames),
+  chr_diversity %>% filter(Pipeline == "EarlGrey") %>% pull(seqnames)
+)
+
+chr_div_common <- chr_diversity %>%
+  filter(seqnames %in% common_chrs)
+
+
+for (level in c("class", "order", "superfamily")) {
+  cat("\nLevel:", level, "\n")
+  
+  ed_vals <- chr_div_common %>% 
+    filter(Pipeline == "EDTA", Level == level) %>% 
+    arrange(seqnames) %>% 
+    pull(Shannon)
+  
+  eg_vals <- chr_div_common %>% 
+    filter(Pipeline == "EarlGrey", Level == level) %>% 
+    arrange(seqnames) %>% 
+    pull(Shannon)
+  
+  # ensure same length
+  print(length(ed_vals))
+  print(length(eg_vals))
+  
+  print(wilcox.test(ed_vals, eg_vals, paired = TRUE))
+}
+
+
+```
+
+#### Correlation Analysis
+
+
+
+```{r echo=FALSE}
+exact_all <- exact_all %>%
+  mutate(
+    ed_len = ed_end - ed_start + 1,
+    eg_len = eg_end - eg_start + 1
+  )
+
+
+```
+
+```{r echo=FALSE}
+cor_len_score <- tibble(
+  Pipeline = c("EDTA", "EarlGrey"),
+  Pearson = c(
+    cor(exact_all$ed_len, exact_all$ed_score, use = "complete.obs"),
+    cor(exact_all$eg_len, exact_all$eg_score, use = "complete.obs")
+  ),
+  Spearman = c(
+    cor(exact_all$ed_len, exact_all$ed_score, use = "complete.obs", method = "spearman"),
+    cor(exact_all$eg_len, exact_all$eg_score, use = "complete.obs", method = "spearman")
+  )
+)
+
+cor_len_score
+
+```
+
+```{r echo=FALSE}
+cor_score <- tibble(
+  Pearson = cor(exact_all$ed_score, exact_all$eg_score, use = "complete.obs"),
+  Spearman = cor(exact_all$ed_score, exact_all$eg_score, use = "complete.obs",
+                 method = "spearman")
+)
+
+cor_score
+
+```
+
+```{r echo=FALSE}
+exact_all <- exact_all %>%
+  mutate(eg_youth = 1 - eg_divergence)  # invert divergence
+
+
+cor_age <- tibble(
+  Metric = c("EDTA_identity vs EG_youth",
+             "EDTA_LTR_identity vs EG_youth"),
+  Pearson = c(
+    cor(exact_all$ed_identity, exact_all$eg_youth, use = "complete.obs"),
+    cor(exact_all$ed_ltr_identity, exact_all$eg_youth, use = "complete.obs")
+  ),
+  Spearman = c(
+    cor(exact_all$ed_identity, exact_all$eg_youth, use = "complete.obs", method="spearman"),
+    cor(exact_all$ed_ltr_identity, exact_all$eg_youth, use = "complete.obs", method="spearman")
+  )
+)
+
+cor_age
+
+```
+
+```{r echo=FALSE}
+ggplot(exact_all, aes(x = ed_len, y = ed_score)) +
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_smooth(method = "lm", color = "black") +
+  theme_bw() +
+  labs(title = "EDTA: TE Length vs Score", x = "Length (bp)", y = "Score")
+
+```
+
+```{r echo=FALSE}
+ggplot(exact_all, aes(x = eg_len, y = eg_score)) +
+  geom_point(alpha = 0.3, color = "darkorange") +
+  geom_smooth(method = "lm", color = "black") +
+  theme_bw() +
+  labs(title = "EarlGrey: TE Length vs Score", x = "Length (bp)", y = "Score")
+
+```
+
+```{r echo=FALSE}
+cor_by_class <- exact_all %>%
+  group_by(ed_class) %>%
+  summarise(
+    cor_len_score = cor(ed_len, ed_score, use="complete.obs"),
+    cor_score_cross = cor(ed_score, eg_score, use="complete.obs"),
+    cor_age = cor(ed_identity, 1 - eg_divergence, use="complete.obs")
+  )
+
+
+```
+
+```{r echo=FALSE}
+safe_cor <- function(x, y, method = "pearson") {
+  ok <- complete.cases(x, y)
+  if (sum(ok) < 2) {
+    return(NA_real_)
+  } else {
+    return(cor(x[ok], y[ok], method = method))
+  }
+}
+
+cor_by_super <- exact_all %>%
+  group_by(ed_super) %>%
+  summarise(
+    n = n(),
+    cor_len_score   = safe_cor(ed_len, ed_score, method = "spearman"),
+    cor_score_cross = safe_cor(ed_score, eg_score, method = "spearman"),
+    .groups = "drop"
+  )
+
+
+cor_by_super
+```
+
+## Overall Summary
+
+#### Agreement indices
+
+```{r echo=FALSE}
+agreement_summary_table <- tibble(
+  Metric = c(
+    "Exact positional matches",
+    "Cohen's kappa (Class)",
+    "Cohen's kappa (Order)",
+    "Cohen's kappa (Superfamily)"
+  ),
+  Value = c(
+    nrow(exact_all),
+    round(kappa_class$value, 3),
+    round(kappa_order$value, 3),
+    round(kappa_super$value, 3)
+  )
+)
+
+agreement_summary_table
+
+```
+
+#### Diversity Indices
+
+```{r echo=FALSE}
+diversity_genomewide
+
+```
+
+Earl Grey consistently exhibited higher TE richness and Shannon
+diversity than EDTA across the genome. This reflects its homology based
+sensitivity, which annotates both intact and degraded copies. EDTA
+produced a more even distribution of TE categories but recovered fewer
+TE families overall, consistent with its preference for structurally
+intact elements. The major chromosome arms (2L, 2R, 3L, 3R) showed the
+highest diversity, whereas the X chromosome displayed the lowest TE
+diversity, a known feature of D. melanogaster TE biology.
+
+#### Correlation Analysis
+
+```{r echo=FALSE}
+correlation_summary <- tibble(
+  Comparison = c(
+    "EDTA length vs EDTA score",
+    "EarlGrey length vs EG score",
+    "EDTA score vs EarlGrey score",
+    "EDTA identity vs EG (1 - divergence)"
+  ),
+  Pearson = c(
+    cor_len_score$Pearson[1],
+    cor_len_score$Pearson[2],
+    cor_score$Pearson,
+    cor_age$Pearson[1]
+  )
+)
+
+correlation_summary
+
+```
+
+EDTA scores were strongly correlated with TE length, consistent with its
+reliance on structural completeness. Earl Grey scores showed only a
+moderate correlation with TE length, reflecting the homologybased
+recovery of older and partially degraded elements. The correlation
+between EDTA and Earl Grey scores for exact matches was moderate,
+showing that the pipelines capture different biological signals. Age
+metrics (EDTA identity vs 1 minus EG KIMURA80 divergence) showed
+positive but moderate correlation, indicating consistent detection of
+young intact TEs, but divergent handling of older fragments.
+
+Overall, EDTA and Earl Grey show substantial positional agreement across
+the genome and strong concordance at the broad TE class level. Earl Grey
+detects a greater diversity of TE families and annotates more degraded
+and nested elements, resulting in higher TE richness and Shannon
+diversity. EDTA is more conservative, identifying fewer but more
+structurally intact TEs, and producing higher agreement for younger
+elements. Correlation analyses reveal that EDTA's scoring strongly
+reflects structural completeness, whereas Earl Grey captures broader
+evolutionary diversity. Thus, the two pipelines provide complementary
+perspectives on the TE landscape of D. melanogaster.
+
+For accurate classification of intact and structurally defined TEs, EDTA
+provides high precision and consistent annotation. For broad recovery of
+TE-derived sequence, including older degraded elements and nested
+insertions, Earl Grey offers superior sensitivity and diversity
+representation. In practice, a combined approach yields the most
+complete reconstruction of the TE landscape, with EDTA providing
+structural certainty and Earl Grey offering comprehensive homology-based
+coverage.
+
+
+
+
+
+```{r}
+summary_tbl <- chr_overlap_summary %>%
+  summarise(
+    Median_Jaccard = median(Jaccard, na.rm = TRUE),
+    IQR_Jaccard    = IQR(Jaccard, na.rm = TRUE),
+    Median_EDTA_bp = median(EDTA_Cov_bp, na.rm = TRUE),
+    Median_EG_bp   = median(EG_Cov_bp, na.rm = TRUE),
+    Median_Overlap = median(Overlap_bp, na.rm = TRUE)
+  )
+summary_tbl
+```
+```{r}
+colnames(chr_overlap_summary)
+```
+```{r}
+dim(chr_overlap_summary)
+```
+
+
+
+```{r}
+write.csv(summary_tbl, "summary_table.csv", row.names = FALSE)
+write.csv(agreement_summary, "exact_match_agreement.csv", row.names = FALSE)
+write.csv(diversity_genomewide, "diversity_genomewide.csv", row.names = FALSE)
+
+```
+
+
+
+```{r}
+wilcox_cov <- wilcox.test(
+  chr_overlap_summary$EDTA_Cov_bp,
+  chr_overlap_summary$EG_Cov_bp,
+  paired = TRUE
+)
+
+wilcox_cov
+
+```
+
+
+
+```{r}
+#optional
+wilcox_counts <- wilcox.test(
+  chr_overlap_summary$EDTA_Count,
+  chr_overlap_summary$EG_Count,
+  paired = TRUE
+)
+
+wilcox_counts
+```
+
+
+```{r}
+median(chr_overlap_summary$EG_Cov_bp - chr_overlap_summary$EDTA_Cov_bp, na.rm=TRUE)
+median(chr_overlap_summary$EG_Count   - chr_overlap_summary$EDTA_Count,   na.rm=TRUE)
+
+```
+
+
+

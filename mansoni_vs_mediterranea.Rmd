@@ -1,0 +1,443 @@
+---
+title: "mansoni_vs_mediterranea"
+author: "Banguket Nina(2366065)"
+date: "2026-01-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+setwd("~/Desktop/Thesis/final_analysis")
+```
+
+```{r include=FALSE}
+library(rtracklayer)
+library(Biostrings)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(patchwork)
+library(stringr)
+library(tibble)
+```
+
+```{r data import, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Importing S. mansoni
+masoni_data <- import("/Users/ninabanguket/Desktop/Thesis/final_analysis/EarlGrey/schistosomaMansoni.filteredRepeats.gff")
+
+#Importing S. mediterranea
+medit_data <- import("/Users/ninabanguket/Desktop/Thesis/final_analysis/EarlGrey/schmidteaMediterranea.filteredRepeats.gff")
+```
+
+```{r}
+# converting to data frames for easy manipulation
+
+
+mansoni_file <- "/Users/ninabanguket/Desktop/Thesis/final_analysis/EarlGrey/schistosomaMansoni.filteredRepeats.gff"
+medit_file <- "/Users/ninabanguket/Desktop/Thesis/final_analysis/EarlGrey/schmidteaMediterranea.filteredRepeats.gff"
+
+# Read as plain tab-delimited tables
+mansoni_data <- read.table(
+  mansoni_file,
+  sep = "\t",
+  header = FALSE,
+  stringsAsFactors = FALSE,
+  quote = "",
+  comment.char = ""
+)
+
+medit_data <- read.table(
+  medit_file,
+  sep = "\t",
+  header = FALSE,
+  stringsAsFactors = FALSE,
+  quote = "",
+  comment.char = ""
+)
+
+# Assign standard GFF column names (first 9 columns only)
+colnames(mansoni_data)[1:9] <- c(
+  "seqid", "source", "type", "start", "end",
+  "score", "strand", "phase", "attributes"
+)
+
+colnames(medit_data)[1:9] <- c(
+  "seqid", "source", "type", "start", "end",
+  "score", "strand", "phase", "attributes"
+)
+
+```
+
+
+```{r}
+head(mansoni_data)
+```
+```{r}
+head(medit_data)
+```
+```{r}
+
+# Dimensions
+dim(mansoni_data)
+dim(medit_data)
+
+# Column names
+colnames(mansoni_data)
+colnames(medit_data)
+
+# First few rows
+head(mansoni_data)
+head(medit_data)
+
+# Structure
+str(mansoni_data)
+str(medit_data)
+
+# Check unique annotation types
+table(mansoni_data$type)
+table(medit_data$type)
+
+```
+
+```{r}
+mansoni_data <- mansoni_data %>%
+  mutate(width = end - start + 1)
+
+medit_data <- medit_data %>%
+  mutate(width = end - start + 1)
+
+mansoni_data <- mansoni_data %>%
+  mutate(length_bp = end - start + 1)
+
+medit_data <- medit_data %>%
+  mutate(length_bp = end - start + 1)
+
+```
+
+
+
+
+```{r eg_filter_and_tables, message=FALSE, warning=FALSE}
+# filtering
+non_te_types <- c("Satellite", "Simple_repeat", "Low_complexity")
+
+mansoni_te <- mansoni_data %>%
+  filter(!type %in% non_te_types)
+
+medit_te <- medit_data %>%
+  filter(!type %in% non_te_types)
+
+```
+
+
+```{r eg_filter_and_tables, message=FALSE, warning=FALSE}
+
+filter_summary <- tibble(
+  dataset = c("mansoni_data", "medit_data"),
+
+  n_rows_initial = c(nrow(mansoni_data), nrow(medit_data)),
+  n_rows_after_filter = c(nrow(mansoni_te), nrow(medit_te)),
+  n_rows_removed = n_rows_initial - n_rows_after_filter,
+  pct_rows_removed = round(100 * n_rows_removed / n_rows_initial, 2),
+
+  bp_initial = c(sum(mansoni_data$length_bp),
+                 sum(medit_data$length_bp)),
+
+  bp_after_filter = c(sum(mansoni_te$length_bp),
+                      sum(medit_te$length_bp)),
+
+  bp_removed = bp_initial - bp_after_filter,
+  pct_bp_removed = round(100 * bp_removed / bp_initial, 2)
+)
+
+kable(
+  filter_summary,
+  caption = "Row and base-pair counts before and after removal of non-TE repeat categories (Satellite, Simple_repeat, Low_complexity)."
+)
+
+```
+
+
+```{r}
+#sanity check after filtering
+table(mansoni_te$type)
+table(medit_te$type)
+```
+
+
+```{r}
+write.csv(
+  mansoni_te,
+  file = "mansoni_TE_only.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  medit_te,
+  file = "medit_TE_only.csv",
+  row.names = FALSE
+)
+```
+
+
+```{r eg_standard_single_order, message=FALSE, warning=FALSE}
+# separation of the type column and reclassification where needed
+
+# ============================================================
+# Earl Grey (EG) only: standardise multi-level `type` into
+# class/order/superfamily/family with a single `order` column.
+# - Keeps original `type`
+# - Adds: eg_prefix, eg_suffix, class_broad, class_I_II, order,
+#         superfamily, family, mechanism, reclassified
+# - Uses attributes as FAMILY-only fallback (NAME=... by default)
+# - Special-case: "I-Jockey" is kept as a single LINE clade label
+# - Helitron mechanism flag based on inferred order
+# ============================================================
+
+`%||%` <- function(x, y) ifelse(is.na(x) | x == "", y, x)
+
+get_attr_value <- function(attr, key) {
+  m <- str_match(attr, paste0("(^|;)", key, "=([^;]+)"))
+  ifelse(is.na(m[,3]), NA_character_, m[,3])
+}
+
+# Split EG type into prefix and suffix (do not change original 'type')
+split_type <- function(df) {
+  df %>%
+    mutate(
+      eg_prefix = if_else(str_detect(type, "/"),
+                          str_extract(type, "^[^/]+"),
+                          type),
+      eg_suffix = if_else(str_detect(type, "/"),
+                          str_extract(type, "(?<=/).*"),
+                          NA_character_)
+    )
+}
+
+# Generic: suffix -> superfamily/family
+# IMPORTANT: do NOT split I-Jockey into family (both are LINE clades)
+infer_sf_fam <- function(suffix) {
+  if (is.na(suffix) || suffix == "") return(list(sf = NA_character_, fam = NA_character_))
+
+  if (str_detect(suffix, regex("^I[-_]?Jockey$", ignore_case = TRUE))) {
+    return(list(sf = "I-Jockey", fam = NA_character_))
+  }
+
+  if (str_detect(suffix, "-")) {
+    left  <- str_split_fixed(suffix, "-", 2)[,1]
+    right <- str_split_fixed(suffix, "-", 2)[,2]
+    return(list(sf = left, fam = right))
+  }
+
+  list(sf = suffix, fam = NA_character_)
+}
+
+infer_sf_fam_vec <- function(suffix_vec) {
+  out <- lapply(suffix_vec, infer_sf_fam)
+  tibble(
+    sf_raw  = vapply(out, `[[`, character(1), "sf"),
+    fam_raw = vapply(out, `[[`, character(1), "fam")
+  )
+}
+
+# Canonicalise superfamily/family
+canonicalise_sf_fam <- function(prefix, suffix, sf_raw, fam_raw) {
+
+  # LTR/ERV1 etc: order LTR, superfamily ERV, family ERV1
+  if (prefix == "LTR" && !is.na(suffix) && str_detect(suffix, regex("^ERV", TRUE))) {
+    return(list(sf = "ERV", fam = suffix))
+  }
+
+  # DNA TcMar-* -> superfamily Tc1-Mariner
+  if (prefix == "DNA" && !is.na(sf_raw) && str_detect(sf_raw, regex("^TcMar$|^Tc1$|^TcMar", TRUE))) {
+    return(list(sf = "Tc1-Mariner", fam = fam_raw %||% "Unknown"))
+  }
+  
+  
+  # DNA CMC-* -> superfamily CACTA
+  if (prefix == "DNA" && !is.na(sf_raw) && str_detect(sf_raw, regex("CMC", TRUE))) {
+    return(list(sf = "CACTA", fam = fam_raw %||% "Unknown"))
+  }
+  
+  # DNA MULE/MuDR -> Mutator (MULE)
+  if (prefix == "DNA" && !is.na(sf_raw) && str_detect(sf_raw, regex("MULE|MuDR|Mutator", TRUE))) {
+    return(list(sf = "Mutator (MULE)", fam = fam_raw %||% "Unknown"))
+  }
+
+  # DNA hAT -> hAT
+  if (prefix == "DNA" && !is.na(sf_raw) && str_detect(sf_raw, regex("^hAT$", TRUE))) {
+    return(list(sf = "hAT", fam = fam_raw %||% "Unknown"))
+  }
+
+  # Otherwise unchanged (e.g., CR1 stays CR1)
+  list(sf = sf_raw, fam = fam_raw)
+}
+
+canonicalise_vec <- function(prefix_vec, suffix_vec, sf_raw_vec, fam_raw_vec) {
+  out <- mapply(
+    canonicalise_sf_fam,
+    prefix_vec, suffix_vec, sf_raw_vec, fam_raw_vec,
+    SIMPLIFY = FALSE
+  )
+  tibble(
+    superfamily = vapply(out, `[[`, character(1), "sf"),
+    family      = vapply(out, `[[`, character(1), "fam")
+  )
+}
+
+# Infer order from prefix + superfamily (single order column)
+infer_order <- function(prefix, superfamily) {
+  if (prefix == "Unknown") return("Unknown")
+
+  # Class I orders
+  if (prefix == "LTR") return("LTR")
+  if (prefix %in% c("SINE", "SINE?")) return("SINE")
+
+  # Penelope: refine LINE -> PLE (keep original type; flag reclassified)
+  if (prefix == "LINE") {
+    if (!is.na(superfamily) && str_detect(superfamily, regex("Penelope", TRUE))) return("PLE")
+    return("LINE")
+  }
+  # Zator: refine order to
+  if (prefix == "DNA") {
+    if (!is.na(superfamily) && str_detect(superfamily, regex("Zator", TRUE))) return("TIR")
+    return("TIR")
+  }
+  
+
+  # Rolling-circle Helitrons
+  if (prefix == "RC") return("Helitron")
+
+  # Class II DNA orders inferred from superfamily
+  if (prefix == "DNA") {
+    sf <- superfamily %||% "Unknown"
+    if (str_detect(sf, regex("Helitron", TRUE))) return("Helitron")
+    if (str_detect(sf, regex("Maverick|Polinton", TRUE))) return("Maverick")
+    if (str_detect(sf, regex("Crypton", TRUE))) return("Crypton")
+    if (str_detect(sf, regex("CMC", TRUE))) return("CACTA")
+    if (str_detect(sf, regex("Zator", TRUE))) return("Zator")
+    if (str_detect(sf, regex("Tc1-Mariner|hAT|Mutator|MULE|PiggyBac|PIF|Harbinger|CACTA|Transib|Merlin|\\bP\\b", TRUE))) return("TIR")
+    return("Unknown")
+  }
+
+  "Unknown"
+}
+
+infer_class_cols <- function(prefix) {
+  if (prefix == "Unknown") return(list(class_broad="Unknown", class_I_II="Unknown"))
+  if (prefix %in% c("LTR","LINE","SINE","SINE?")) return(list(class_broad="Retrotransposon", class_I_II="I"))
+  if (prefix %in% c("DNA","RC")) return(list(class_broad="DNA transposon", class_I_II="II"))
+  list(class_broad="Unknown", class_I_II="Unknown")
+}
+
+standardise_eg <- function(df, family_attr_key = "NAME") {
+
+  df <- split_type(df)
+
+  # Superfamily/family from suffix
+  sf_fam0 <- infer_sf_fam_vec(df$eg_suffix)
+  df <- bind_cols(df, sf_fam0)
+
+  # Canonicalise
+  sf_fam1 <- canonicalise_vec(df$eg_prefix, df$eg_suffix, df$sf_raw, df$fam_raw)
+  df <- bind_cols(df, sf_fam1)
+
+  # FAMILY fallback from attributes (limited to NAME=... by default)
+  fam_from_attr <- get_attr_value(df$attributes, family_attr_key)
+
+  df <- df %>%
+    mutate(
+      family = coalesce(family, fam_from_attr),
+
+      # enforce Unknown, not NA
+      superfamily = if_else(is.na(superfamily) | superfamily == "", "Unknown", superfamily),
+      family      = if_else(is.na(family)      | family == "",      "Unknown", family)
+    ) %>%
+    rowwise() %>%
+    mutate(
+      class_broad = infer_class_cols(eg_prefix)$class_broad,
+      class_I_II  = infer_class_cols(eg_prefix)$class_I_II,
+      order       = infer_order(eg_prefix, superfamily),
+
+      # TRUE when our order differs from EG prefix 
+      reclassified = (eg_prefix %||% "Unknown") != (order %||% "Unknown")
+    ) %>%
+    ungroup() %>%
+    mutate(
+      # Helitron mechanism flag based on inferred order 
+      mechanism = case_when(
+        order == "Helitron" ~ "Rolling-circle",
+        TRUE ~ "Unknown"
+      )
+    ) %>%
+    select(-sf_raw, -fam_raw)
+
+  # Repeat Unknown for Unknown type rows across taxonomy fields
+  df %>%
+    mutate(
+      class_broad = if_else(type == "Unknown", "Unknown", class_broad),
+      class_I_II  = if_else(type == "Unknown", "Unknown", class_I_II),
+      order       = if_else(type == "Unknown", "Unknown", order),
+      superfamily = if_else(type == "Unknown", "Unknown", superfamily),
+      family      = if_else(type == "Unknown", "Unknown", family),
+      mechanism   = if_else(type == "Unknown", "Unknown", mechanism)
+    )
+}
+
+# applying to data
+mansoni_te <- standardise_eg(mansoni_te)
+medit_te   <- standardise_eg(medit_te)
+```
+
+
+```{r eg_standard_single_order, message=FALSE, warning=FALSE}
+# checks
+medit_te %>%
+  filter(type == "LINE/Penelope") %>%
+  select(type, eg_prefix, order, superfamily, family, reclassified) %>%
+  head(3)
+
+medit_te %>%
+  filter(type == "LTR/ERV1") %>%
+  select(type, order, superfamily, family, reclassified) %>%
+  head(3)
+
+medit_te %>%
+  filter(type == "RC/Helitron") %>%
+  select(type, order, superfamily, mechanism) %>%
+  head(3)
+
+```
+
+
+```{r}
+mansoni_te %>% count(class_I_II, order, superfamily, sort = TRUE)
+medit_te   %>% count(class_I_II, order, superfamily, sort = TRUE)
+
+```
+
+```{r}
+table(mansoni_te$superfamily)
+table(medit_te$superfamily)
+```
+
+```{r}
+write.csv(
+  mansoni_te,
+  file = "mansoni_TE_std.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  medit_te,
+  file = "medit_TE_std.csv",
+  row.names = FALSE
+)
+```
+
+

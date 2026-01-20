@@ -1,0 +1,573 @@
+---
+title: "final_MCTE_benchmarking"
+author: "Banguket Nina(2366065)"
+date: "2026-01-08"
+output:
+  pdf_document:
+    toc: false
+fontsize: 11pt
+geometry: margin=1in
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("~/Desktop/Thesis/Benchmarking/MCTE_Benchmarking")
+```
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(stringr)
+  library(readr)
+  library(GenomicRanges)
+  library(IRanges)
+  library(tidyr)
+  library(purrr)
+  library(fmsb)
+  library(tidyr)
+  library(ggplot2)
+  library(readr)
+})
+```
+
+
+
+```{r}
+# ----------------------------
+# INPUT FILES 
+# ----------------------------
+mcte_bed   <- "~/Desktop/Thesis/Benchmarking/MCTE_Benchmarking/MCTE/TEsREPET/DeNovoCoordinates/ISO1.bed"
+earl_csv   <- "~/Desktop/Thesis/Benchmarking/benchmarking_EDA/droso_earlG_standardised.csv"
+edta_csv   <- "~/Desktop/Thesis/Benchmarking/benchmarking_EDA/droso_edta_standardised.csv"
+```
+
+
+
+```{r}
+
+# ============================================================
+# 1) SEQNAME MAPPING: accession -> chromosome (from your screenshot)
+# ============================================================
+acc_to_chr <- c(
+  "AE014298.5" = "X",
+  "AE014134.6" = "2L",
+  "AE013599.5" = "2R",
+  "AE014296.5" = "3L",
+  "AE014297.3" = "3R",
+  "AE014135.4" = "4",
+  "CP007106.1" = "Y",
+  "KJ947872.2" = "MT"
+)
+
+# ============================================================
+# 2) EUCHROMATIN REGIONS (MCTE readme; Release 6 coordinates)
+#    2L: 530,000..18,870,000
+#    2R: 5,982,495..24,972,477
+#    3L: 750,000..19,026,900
+#    3R: 6,754,278..31,614,278
+#    X : 1,325,967..21,338,973
+# ============================================================
+euch_df <- data.frame(
+  chr   = c("2L","2R","3L","3R","X"),
+  start = c(  530000,  5982495,   750000,  6754278,  1325967),
+  end   = c(18870000, 24972477, 19026900, 31614278, 21338973),
+  stringsAsFactors = FALSE
+)
+
+euch_gr <- GRanges(
+  seqnames = euch_df$chr,
+  ranges   = IRanges(start = euch_df$start, end = euch_df$end),
+  strand   = "*"
+)
+
+# Evaluate only euchromatin space
+eval_chr <- euch_df$chr
+total_bp_eval <- sum(IRanges::width(euch_gr))
+
+# ============================================================
+# 3) HELPERS
+# ============================================================
+make_gr <- function(df, seq_col, start_col, end_col, strand_col = NULL, keep_cols = character()) {
+  df[[start_col]] <- as.integer(df[[start_col]])
+  df[[end_col]]   <- as.integer(df[[end_col]])
+
+  gr <- GRanges(
+    seqnames = df[[seq_col]],
+    ranges   = IRanges(start = df[[start_col]], end = df[[end_col]]),
+    strand   = if (!is.null(strand_col)) df[[strand_col]] else "*"
+  )
+
+  if (length(keep_cols) > 0) {
+    mcols(gr) <- df[, keep_cols, drop = FALSE]
+  }
+  gr
+}
+
+reduce_gr <- function(gr) GenomicRanges::reduce(gr, ignore.strand = TRUE)
+
+# Trim any GRanges to euchromatin windows (and clip boundaries)
+trim_to_euchromatin <- function(gr, euch_gr) {
+  gr <- gr[as.character(seqnames(gr)) %in% as.character(seqnames(euch_gr))]
+  hits <- GenomicRanges::findOverlaps(gr, euch_gr, ignore.strand = TRUE)
+  if (length(hits) == 0) return(gr[0])
+
+  gr2   <- gr[S4Vectors::queryHits(hits)]
+  euch2 <- euch_gr[S4Vectors::subjectHits(hits)]
+
+  IRanges::ranges(gr2) <- IRanges::pintersect(IRanges::ranges(gr2), IRanges::ranges(euch2))
+  gr2 <- gr2[IRanges::width(gr2) > 0]
+  gr2
+}
+
+# Convert "LTR/Gypsy" -> order="LTR", superfamily="Gypsy"
+split_order_super <- function(x) {
+  x <- ifelse(is.na(x), NA_character_, as.character(x))
+  out_order <- rep(NA_character_, length(x))
+  out_super <- rep(NA_character_, length(x))
+
+  parts <- strsplit(x, "/", fixed = TRUE)
+  for (i in seq_along(parts)) {
+    if (length(parts[[i]]) >= 1) out_order[i] <- trimws(parts[[i]][1])
+    if (length(parts[[i]]) >= 2) out_super[i] <- trimws(parts[[i]][2])
+  }
+
+  data.frame(order = na_if_empty(out_order), superfamily = na_if_empty(out_super), stringsAsFactors = FALSE)
+}
+
+na_if_empty <- function(v) {
+  v[v == ""] <- NA_character_
+  v
+}
+
+# Infer Class (RNA/DNA) from order
+order_to_class <- function(order) {
+  o <- toupper(order)
+  cls <- rep(NA_character_, length(o))
+  cls[o %in% c("LTR","LINE","SINE","RETROPOSON","RETROTRANSPOSON")] <- "RNA"
+  cls[o %in% c("TIR","DNA","HELITRON","MITE","TRANSPOSON","RC")]    <- "DNA"
+  cls
+}
+
+bp_confusion <- function(pred_gr, ref_gr, total_bp) {
+  pred_gr <- reduce_gr(pred_gr)
+  ref_gr  <- reduce_gr(ref_gr)
+
+  ov        <- GenomicRanges::intersect(pred_gr, ref_gr)
+  pred_only <- GenomicRanges::setdiff(pred_gr, ref_gr)
+  ref_only  <- GenomicRanges::setdiff(ref_gr, pred_gr)
+
+  TP <- sum(IRanges::width(ov))
+  FP <- sum(IRanges::width(pred_only))
+  FN <- sum(IRanges::width(ref_only))
+  TN <- total_bp - TP - FP - FN
+
+  data.frame(TP = TP, FP = FP, FN = FN, TN = TN, total_bp = total_bp, check.names = FALSE)
+}
+
+metrics_from_confusion <- function(conf_df) {
+  TP <- as.numeric(conf_df$TP[1])
+  FP <- as.numeric(conf_df$FP[1])
+  FN <- as.numeric(conf_df$FN[1])
+  TN <- as.numeric(conf_df$TN[1])
+
+  Sensitivity <- if ((TP + FN) == 0) NA_real_ else TP / (TP + FN)  # Recall
+  Specificity <- if ((TN + FP) == 0) NA_real_ else TN / (TN + FP)
+  Precision   <- if ((TP + FP) == 0) NA_real_ else TP / (TP + FP)
+  FDR         <- if ((TP + FP) == 0) NA_real_ else FP / (TP + FP)
+  Accuracy    <- if ((TP + TN + FP + FN) == 0) NA_real_ else (TP + TN) / (TP + TN + FP + FN)
+  F1          <- if (is.na(Precision) || is.na(Sensitivity) || (Precision + Sensitivity) == 0) NA_real_
+                 else 2 * (Precision * Sensitivity) / (Precision + Sensitivity)
+
+  data.frame(
+    Sensitivity = Sensitivity,
+    Specificity = Specificity,
+    Accuracy    = Accuracy,
+    Precision   = Precision,
+    F1          = F1,
+    FDR         = FDR,
+    check.names = FALSE
+  )
+}
+
+bench_overall <- function(pred_gr, ref_gr, pipeline_name) {
+  conf <- bp_confusion(pred_gr, ref_gr, total_bp_eval)
+  met  <- metrics_from_confusion(conf)
+
+  data.frame(
+    Pipeline = pipeline_name,
+    Level    = "ALL",
+    Label    = "ALL",
+    TP       = as.numeric(conf$TP[1]),
+    FP       = as.numeric(conf$FP[1]),
+    FN       = as.numeric(conf$FN[1]),
+    TN       = as.numeric(conf$TN[1]),
+    total_bp = as.numeric(conf$total_bp[1]),
+    Sensitivity = met$Sensitivity[1],
+    Specificity = met$Specificity[1],
+    Accuracy    = met$Accuracy[1],
+    Precision   = met$Precision[1],
+    F1          = met$F1[1],
+    FDR         = met$FDR[1],
+    check.names = FALSE
+  )
+}
+
+bench_by_level <- function(pred_gr, ref_gr, pipeline_name, level) {
+  # level in: "class", "order", "superfamily"
+  pred_lab <- unique(mcols(pred_gr)[[level]])
+  ref_lab  <- unique(mcols(ref_gr)[[level]])
+  labs <- sort(unique(c(pred_lab, ref_lab)))
+  labs <- labs[!is.na(labs)]
+
+  rows <- lapply(labs, function(lb) {
+    p <- pred_gr[which(mcols(pred_gr)[[level]] == lb)]
+    r <- ref_gr[which(mcols(ref_gr)[[level]] == lb)]
+    conf <- bp_confusion(p, r, total_bp_eval)
+    met  <- metrics_from_confusion(conf)
+
+    data.frame(
+      Pipeline = pipeline_name,
+      Level    = level,
+      Label    = lb,
+      TP       = as.numeric(conf$TP[1]),
+      FP       = as.numeric(conf$FP[1]),
+      FN       = as.numeric(conf$FN[1]),
+      TN       = as.numeric(conf$TN[1]),
+      total_bp = as.numeric(conf$total_bp[1]),
+      Sensitivity = met$Sensitivity[1],
+      Specificity = met$Specificity[1],
+      Accuracy    = met$Accuracy[1],
+      Precision   = met$Precision[1],
+      F1          = met$F1[1],
+      FDR         = met$FDR[1],
+      check.names = FALSE
+    )
+  })
+
+  # Include an ALL row for that pipeline (handy in the same table)
+  out <- rbind(bench_overall(pred_gr, ref_gr, pipeline_name), do.call(rbind, rows))
+  out
+}
+
+# ============================================================
+# 4) LOAD MCTE BED (ISO1.bed) AND BUILD GRanges
+#    BED is 0-based start; GRanges is 1-based.
+#    Expected columns include:
+#    chr, start, end, name, size, strand, family, superfamily, order, class, ...
+# ============================================================
+mcte_raw <- read.table(mcte_bed, sep = "\t", header = FALSE, stringsAsFactors = FALSE, quote = "")
+
+if (ncol(mcte_raw) < 10) {
+  stop("ISO1.bed has fewer than 10 columns; cannot extract class/order/superfamily as expected.")
+}
+
+mcte_df <- data.frame(
+  chr         = mcte_raw[[1]],
+  start       = as.integer(mcte_raw[[2]]) + 1L,
+  end         = as.integer(mcte_raw[[3]]),
+  superfamily = mcte_raw[[8]],
+  order       = mcte_raw[[9]],
+  class       = mcte_raw[[10]],
+  stringsAsFactors = FALSE
+)
+
+# restrict to euchromatin chromosomes and then trim to euchromatin windows
+mcte_df <- mcte_df[mcte_df$chr %in% eval_chr, , drop = FALSE]
+mcte_gr <- make_gr(mcte_df, "chr", "start", "end", strand_col = NULL, keep_cols = c("class","order","superfamily"))
+mcte_gr <- trim_to_euchromatin(mcte_gr, euch_gr)
+
+# ============================================================
+# 5) LOAD PREDICTIONS (EDTA, Earl Grey), MAP ACCESSIONS -> CHR, BUILD GRanges, TRIM TO EUCHROMATIN
+# ============================================================
+
+# ---- Earl Grey ----
+earl <- read.csv(earl_csv, stringsAsFactors = FALSE)
+
+needed_earl <- c("seqnames","start","end","strand","type")
+missing_earl <- setdiff(needed_earl, colnames(earl))
+if (length(missing_earl) > 0) stop(paste("Earl Grey CSV missing columns:", paste(missing_earl, collapse=", ")))
+
+earl$chr <- unname(acc_to_chr[earl$seqnames])
+earl <- earl[!is.na(earl$chr) & earl$chr %in% eval_chr, , drop = FALSE]
+
+earl_split <- split_order_super(earl$type)
+earl$order <- earl_split$order
+earl$superfamily <- earl_split$superfamily
+earl$class <- order_to_class(earl$order)
+
+earl_gr <- make_gr(earl, "chr", "start", "end", "strand", keep_cols = c("class","order","superfamily"))
+earl_gr <- trim_to_euchromatin(earl_gr, euch_gr)
+
+# ---- EDTA ----
+edta <- read.csv(edta_csv, stringsAsFactors = FALSE)
+
+needed_edta <- c("seqnames","start","end","strand","classification")
+missing_edta <- setdiff(needed_edta, colnames(edta))
+if (length(missing_edta) > 0) stop(paste("EDTA CSV missing columns:", paste(missing_edta, collapse=", ")))
+
+edta$chr <- unname(acc_to_chr[edta$seqnames])
+edta <- edta[!is.na(edta$chr) & edta$chr %in% eval_chr, , drop = FALSE]
+
+edta_split <- split_order_super(edta$classification)
+edta$order <- edta_split$order
+edta$superfamily <- edta_split$superfamily
+edta$class <- order_to_class(edta$order)
+
+edta_gr <- make_gr(edta, "chr", "start", "end", "strand", keep_cols = c("class","order","superfamily"))
+edta_gr <- trim_to_euchromatin(edta_gr, euch_gr)
+
+# ============================================================
+# 6) SANITY CHECKS (recommended)
+# ============================================================
+cat("Euchromatin total bp evaluated:", total_bp_eval, "\n")
+cat("MCTE euchromatin TE bp:", sum(width(reduce_gr(mcte_gr))), "\n")
+cat("EDTA euchromatin TE bp:", sum(width(reduce_gr(edta_gr))), "\n")
+cat("EarlGrey euchromatin TE bp:", sum(width(reduce_gr(earl_gr))), "\n")
+cat("Seqlevels used:", paste(eval_chr, collapse = ", "), "\n\n")
+
+# ============================================================
+# 7) RUN BENCHMARKING (overall + class/order/superfamily)
+# ============================================================
+overall <- rbind(
+  bench_overall(edta_gr, mcte_gr, "EDTA"),
+  bench_overall(earl_gr, mcte_gr, "EarlGrey")
+)
+
+by_class <- rbind(
+  bench_by_level(edta_gr, mcte_gr, "EDTA", "class"),
+  bench_by_level(earl_gr, mcte_gr, "EarlGrey", "class")
+)
+
+by_order <- rbind(
+  bench_by_level(edta_gr, mcte_gr, "EDTA", "order"),
+  bench_by_level(earl_gr, mcte_gr, "EarlGrey", "order")
+)
+
+by_superfamily <- rbind(
+  bench_by_level(edta_gr, mcte_gr, "EDTA", "superfamily"),
+  bench_by_level(earl_gr, mcte_gr, "EarlGrey", "superfamily")
+)
+
+# ============================================================
+# 8) SAVE OUTPUTS
+# ============================================================
+write.csv(overall,        "benchmark_overall_euch_bp.csv", row.names = FALSE)
+write.csv(by_class,       "benchmark_by_class_euch_bp.csv", row.names = FALSE)
+write.csv(by_order,       "benchmark_by_order_euch_bp.csv", row.names = FALSE)
+write.csv(by_superfamily, "benchmark_by_superfamily_euch_bp.csv", row.names = FALSE)
+
+print(overall)
+
+cat("\nWrote CSV files:\n",
+    "  benchmark_overall_euch_bp.csv\n",
+    "  benchmark_by_class_euch_bp.csv\n",
+    "  benchmark_by_order_euch_bp.csv\n",
+    "  benchmark_by_superfamily_euch_bp.csv\n")
+
+```
+
+
+
+```{r}
+
+# ============================================================
+# Radar charts
+# ============================================================
+over_bp <- read.csv("~/Desktop/Thesis/Benchmarking/MCTE_Benchmarking/benchmark_by_class_euch_bp.csv", stringsAsFactors = FALSE)
+
+metrics <- c("Sensitivity","Specificity","Accuracy","Precision","F1","FDR")
+
+over_bp <- over_bp %>%
+  filter(Level == "class") %>%
+  select(Pipeline, Label, all_of(metrics))
+```
+
+
+
+
+```{r}
+COL_EDTA <- "#E76F6A"  # coral / red
+COL_EG   <- "#4FB3B8"  # teal
+
+
+plot_class_radar_both <- function(data, class_name, main_title) {
+
+  sub <- data %>%
+    filter(Label == class_name) %>%
+    arrange(match(Pipeline, c("EDTA","EarlGrey"))) %>%
+    select(Pipeline, all_of(metrics))
+
+  radar_df <- sub %>% select(all_of(metrics))
+  rownames(radar_df) <- sub$Pipeline
+
+  # fmsb requires max/min rows
+  radar_df <- rbind(
+    rep(1, ncol(radar_df)),  # max
+    rep(0, ncol(radar_df)),  # min
+    radar_df
+  )
+
+  # Short metric labels
+  colnames(radar_df) <- c("Sen","Spe","Acc","Prec","F1","FDR")
+
+  par(
+    mar = c(4, 4, 5, 4),   # larger inner margins (prevents clipping)
+    xpd = NA
+  )
+
+  radarchart(
+    radar_df,
+    axistype = 1,
+    pcol  = c(COL_EDTA, COL_EG),
+    pfcol = c(
+      adjustcolor(COL_EDTA, alpha.f = 0.45),
+      adjustcolor(COL_EG,   alpha.f = 0.45)
+    ),
+    plwd = 4,
+    plty = 1,
+    cglcol = "grey75",
+    cglty = 1,
+    axislabcol = "grey40",
+    caxislabels = seq(0,1,0.2),
+    cglwd = 0.9,
+    vlcex = 1.1,           # larger axis labels
+    title = main_title
+  )
+
+  legend(
+    "bottom",
+    inset = -0.28,
+    legend = c("EDTA", "Earl Grey"),
+    horiz = TRUE,
+    bty = "n",
+    pch = 20,
+    col = c(COL_EDTA, COL_EG),
+    text.col = "grey30",
+    cex = 1.2,
+    pt.cex = 2.5
+  )
+
+}
+
+```
+
+
+```{r}
+pdf("radar_classII.pdf", width = 8, height = 8)
+
+plot_class_radar_both(
+  data = over_bp,
+  class_name = "DNA",
+  main_title = "Class II"
+)
+
+legend(
+  "topright",
+  inset = 0.02,
+  legend = c("EDTA", "Earl Grey"),
+  bty = "n",
+  pch = 15,
+  col = c("#E76F6A", "#4FB3B8"),  # EDTA (coral), Earl Grey (teal)
+  text.col = "grey30",
+  cex = 1.2,
+  pt.cex = 2
+)
+
+dev.off()
+
+```
+
+
+```{r}
+pdf("radar_classI.pdf", width = 8, height = 8)
+plot_class_radar_both(
+  data = over_bp,
+  class_name = "RNA",
+  main_title = "Class I"
+)
+dev.off()
+
+```
+
+```{r}
+
+# Load class-level results
+by_class <- read_csv("benchmark_by_class_euch_bp.csv", show_col_types = FALSE)
+
+# Keep only true class rows (DNA/RNA) and the metrics we want
+plot_df <- by_class %>%
+  filter(Level == "class", Label %in% c("DNA", "RNA")) %>%
+  select(Pipeline, Class = Label, Sensitivity, Precision, F1) %>%
+  pivot_longer(cols = c(Sensitivity, Precision, F1),
+               names_to = "Metric", values_to = "Value") %>%
+  mutate(
+    Pipeline = recode(Pipeline, "EarlGrey" = "Earl Grey"),
+    Metric = factor(Metric, levels = c("Sensitivity", "Precision", "F1")),
+    Class  = factor(Class, levels = c("RNA", "DNA"))
+  )
+
+# Plot
+ggplot(plot_df, aes(x = Class, y = Value, fill = Pipeline)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  facet_wrap(~ Metric, nrow = 1) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(x = NULL, y = "Score", fill = NULL) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    panel.grid.minor = element_blank()
+  )
+
+# Save
+ggsave("mcte_class_level_metrics.png", width = 9, height = 3.5, dpi = 300)
+
+```
+
+
+
+```{r}
+
+overall <- read_csv("benchmark_overall_euch_bp.csv", show_col_types = FALSE)
+
+conf_long <- overall %>%
+  select(Pipeline, TP, FP, FN, TN, total_bp) %>%
+  mutate(
+    Pipeline = recode(Pipeline, "EarlGrey" = "Earl Grey"),
+    TP = TP / total_bp,
+    FP = FP / total_bp,
+    FN = FN / total_bp,
+    TN = TN / total_bp
+  ) %>%
+  pivot_longer(cols = c(TP, FP, FN, TN), names_to = "Category", values_to = "Fraction") %>%
+  mutate(Category = factor(Category, levels = c("TP","FN","FP","TN")))
+
+ggplot(conf_long, aes(x = Pipeline, y = Fraction, fill = Category)) +
+  geom_col(width = 0.65) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(x = NULL, y = "Fraction of evaluated euchromatin", fill = NULL) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("mcte_confusion_fractions.png", width = 6.5, height = 4, dpi = 300)
+
+```
+
+```{r}
+confusion_mat <- read.csv("~/Desktop/Thesis/Benchmarking/MCTE_Benchmarking/benchmark_overall_euch_bp.csv", stringsAsFactors = FALSE)
+```
+
+```{r}
+head(confusion_mat)
+```
+
