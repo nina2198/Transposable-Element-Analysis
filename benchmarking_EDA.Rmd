@@ -1,0 +1,876 @@
+---
+title: "benchmarking_eda"
+author: "Banguket Nina(2366065)"
+date: "2026-01-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Results
+
+```{r include=FALSE}
+setwd("~/Desktop/Thesis/Benchmarking/benchmarking_EDA")
+```
+
+```{r include=FALSE}
+library(rtracklayer)
+library(Biostrings)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(patchwork)
+library(stringr)
+```
+
+
+
+
+```{r data import, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Importing drosophila TE annotation from EDTA
+droso_edta <- import("/Users/ninabanguket/Desktop/Thesis/Benchmarking/EDTA/drosophila_fasta.mod.EDTA.TEanno2.gff3")
+
+```
+
+
+```{r}
+#Importing Drosophila M annotation from EarlGrey
+droso_earlG_file <- "/Users/ninabanguket/Desktop/Thesis/Benchmarking/EarlGrey/drosophilaMelanogaster.filteredRepeats.gff"
+
+# Read as plain tab-delimited tables
+droso_earlG <- read.table(
+  droso_earlG_file,
+  sep = "\t",
+  header = FALSE,
+  stringsAsFactors = FALSE,
+  quote = "",
+  comment.char = ""
+)
+
+# Assign standard GFF column names (first 9 columns only)
+colnames(droso_earlG)[1:9] <- c(
+  "seqid", "source", "type", "start", "end",
+  "score", "strand", "phase", "attributes"
+)
+
+droso_earlG <- droso_earlG %>%
+  mutate(
+    seqid  = as.character(seqid),
+    source = as.character(source),
+    type   = as.character(type),
+    strand = as.character(strand),
+    phase  = as.character(phase),
+    attributes = as.character(attributes)
+  )
+
+```
+
+
+```{r conversion_to_dataframe}
+# Converting to data frame
+droso_edta <- as.data.frame(droso_edta)
+droso_earlG <- as.data.frame(droso_earlG)
+
+```
+
+```{r}
+droso_edta <- droso_edta %>%
+  # Avoid factor pitfalls in joins/mapping later
+  mutate(
+    seqnames = as.character(seqnames),
+    strand   = as.character(strand),
+    source   = as.character(source),
+    type     = as.character(type)
+  )
+
+droso_edta <- droso_edta %>% select(-Parent)
+```
+
+```{r}
+droso_edta <- droso_edta %>%
+  mutate(width = end - start + 1)
+
+droso_earlG <- droso_earlG %>%
+  mutate(width = end - start + 1)
+
+```
+
+
+```{r}
+# Dimensions
+dim(droso_edta)
+dim(droso_earlG)
+
+# Column names
+colnames(droso_edta)
+colnames(droso_earlG)
+
+# First few rows
+head(droso_edta)
+head(droso_earlG)
+
+# Structure
+str(droso_edta)
+str(droso_earlG)
+
+# Check unique annotation types
+table(droso_edta$classification)
+table(droso_earlG$type)
+```
+
+```{r eg_filter_and_tables, message=FALSE, warning=FALSE}
+# filtering
+non_te_types <- c("Satellite", "Simple_repeat", "Low_complexity", "repeat_region", "target_site_duplication", "long_terminal_repeat","rRNA", "repeat_fragment")
+
+droso_edta_TEonly <- droso_edta %>%
+  filter(!classification %in% non_te_types)
+
+droso_earlG_TEonly <- droso_earlG %>%
+  filter(!type %in% non_te_types)
+```
+
+```{r}
+table(droso_edta_TEonly$classification)
+table(droso_earlG_TEonly$type)
+```
+
+
+
+```{r eg_filter_and_tables, message=FALSE, warning=FALSE}
+filter_summary <- tibble(
+  dataset = c("droso_edta", "droso_earlG"),
+  
+  # Row counts
+  n_rows_initial = c(nrow(droso_edta), nrow(droso_earlG)),
+  n_rows_after_filter = c(nrow(droso_edta_TEonly), nrow(droso_earlG_TEonly)),
+  n_rows_removed = n_rows_initial - n_rows_after_filter,
+  pct_rows_removed = round(100 * n_rows_removed / n_rows_initial, 2),
+  
+  # Base pairs
+  bp_initial = c(sum(droso_edta$width, na.rm = TRUE),
+                 sum(droso_earlG$width, na.rm = TRUE)),
+  bp_after_filter = c(sum(droso_edta_TEonly$width, na.rm = TRUE),
+                      sum(droso_earlG_TEonly$width, na.rm = TRUE)),
+  bp_removed = bp_initial - bp_after_filter,
+  pct_bp_removed = round(100 * bp_removed / bp_initial, 2)
+)
+
+kable(
+  filter_summary,
+  caption = "Row and base-pair counts before and after removal of non-TE repeat categories."
+)
+
+```
+
+
+
+
+
+
+```{r}
+write.csv(
+  droso_edta_TEonly,
+  file = "droso_edta_TEonly.csv",
+  row.names = FALSE
+)
+```
+
+
+```{r}
+write.csv(
+  droso_earlG_TEonly,
+  file = "droso_earlG_TEonly.csv",
+  row.names = FALSE
+)
+```
+
+
+```{r}
+# ============================================================
+# FINAL FULL HARMONISATION CODE (EDTA + Earl Grey) — Wicker et al. (2007)
+#
+# Implements your rules:
+#   - one canonical `order` column
+#   - decode EDTA 3-letter codes (DTM, DTT, etc.) + suffix codes (DNA/DTM etc.)
+#   - treat MITE and DNAnona as flags (not taxonomic ranks)
+#   - treat I-Jockey as a single LINE clade (no split to family)
+#   - propagate superfamily -> order -> class when unambiguous
+#   - use literal "Unknown" everywhere (case/whitespace normalised)
+#   - Earl Grey special-case: DNA/CMC-Transib -> order=TIR, superfamily=Transib, family=CMC, class II
+#   - conflict resolution: retro-order + DNA/TIR superfamily -> force TIR/Class II
+#   - invariant enforcement + sanity checks
+#
+# EXPECTS INPUT OBJECTS:
+#   droso_earlG_TEonly with columns: type, attributes (optional)
+#   droso_edta_TEonly  with column:  classification
+# ============================================================
+
+library(dplyr)
+library(stringr)
+
+`%||%` <- function(x, y) ifelse(is.na(x) | x == "", y, x)
+
+# ------------------------------------------------------------
+# HARD normalisation: every unknown-like value becomes exactly "Unknown"
+# ------------------------------------------------------------
+normalise_unknowns <- function(df) {
+  tax_cols <- intersect(c("class_broad","class_I_II","order","superfamily","family"), names(df))
+  df %>%
+    mutate(across(all_of(tax_cols), ~{
+      x <- as.character(.x)
+      x <- str_trim(x)
+      x <- if_else(is.na(x) | x == "", "Unknown", x)
+      x <- if_else(str_to_lower(x) == "unknown", "Unknown", x)
+      x
+    }))
+}
+
+# ------------------------------------------------------------
+# EDTA: normalize LINE labels
+# ------------------------------------------------------------
+normalize_edta_line_labels <- function(x) {
+  x <- as.character(x)
+  out <- str_trim(x)
+
+  already_multilevel <- str_detect(out, "/")
+  lower <- str_to_lower(out)
+
+  out[!already_multilevel & lower == "i"]      <- "LINE/I"
+  out[!already_multilevel & lower == "jockey"] <- "LINE/Jockey"
+
+  subset_vals <- out[!already_multilevel]
+  m <- str_match(subset_vals, "^([iI])[-_:|]([jJ]ockey)$")
+  has_m <- !is.na(m[,1])
+  if (any(has_m)) {
+    idx_global <- which(!already_multilevel)[has_m]
+    out[idx_global] <- "LINE/I-Jockey"
+  }
+
+  out
+}
+
+# ------------------------------------------------------------
+# EDTA: map standalone 3-letter code -> multi-level type
+# preserve trailing text as family using "-"
+# ------------------------------------------------------------
+map_edta_code_alone_to_type <- function(x) {
+  x <- as.character(x)
+
+  m <- str_match(x, "^([A-Z]{3})(?:[-_:|](.+))?$")
+  code <- m[,2]
+  rest <- m[,3]
+
+  out <- x
+  is_code <- !is.na(code)
+
+  # LTR
+  out[is_code & code == "RLC"] <- "LTR/Copia"
+  out[is_code & code == "RLG"] <- "LTR/Gypsy"
+  out[is_code & code == "RLB"] <- "LTR/Bel-Pao"
+  out[is_code & code == "RLE"] <- "LTR/ERV"
+  out[is_code & code %in% c("RLU","RLX")] <- "LTR/Unknown"
+
+  # LINE
+  out[is_code & code == "RIL"] <- "LINE/L1"
+  out[is_code & code == "RII"] <- "LINE/I"
+  out[is_code & code == "RIJ"] <- "LINE/Jockey"
+  out[is_code & code == "RIT"] <- "LINE/RTE"
+  out[is_code & code == "RIX"] <- "LINE/Unknown"
+
+  # SINE
+  out[is_code & code %in% c("RIS","RSX")] <- "SINE/Unknown"
+
+  # DNA (TIR)
+  out[is_code & code == "DTA"] <- "DNA/hAT"
+  out[is_code & code == "DTC"] <- "DNA/CACTA"
+  out[is_code & code == "DTH"] <- "DNA/PIF-Harbinger"
+  out[is_code & code == "DTM"] <- "DNA/Mutator"
+  out[is_code & code == "DTT"] <- "DNA/Tc1-Mariner"
+
+  # Helitron
+  out[is_code & code == "DHH"] <- "RC/Helitron"
+  
+  # Maverick
+  out[is_code & code == "DMM"] <- "Maverick"
+
+  # Append remainder
+  has_rest <- is_code & !is.na(rest) & rest != ""
+  out[has_rest] <- paste0(out[has_rest], "-", rest[has_rest])
+
+  out
+}
+
+# ------------------------------------------------------------
+# EDTA: decode suffix codes in multi-level strings (DNA/DTM, LTR/RLG, LINE/RII)
+# ------------------------------------------------------------
+decode_edta_suffix_code <- function(prefix, suffix) {
+  if (is.na(suffix) || suffix == "") return(suffix)
+
+  if (prefix == "DNA") {
+    if (suffix == "DTM") return("Mutator")
+    if (suffix == "DTT") return("Tc1-Mariner")
+    if (suffix == "DTA") return("hAT")
+    if (suffix == "DTC") return("CACTA")
+    if (suffix == "DTH") return("PIF-Harbinger")
+    if (suffix == "DMM") return("Maverick")
+    if (suffix == "DHH") return("Helitron")
+  }
+
+  if (prefix == "LTR") {
+    if (suffix == "RLG") return("Gypsy")
+    if (suffix == "RLC") return("Copia")
+    if (suffix == "RLB") return("Bel-Pao")
+    if (suffix == "RLE") return("ERV")
+    if (suffix == "RLR") return("Retrovirus")
+  }
+
+  if (prefix == "LINE") {
+    if (suffix == "RIL") return("L1")
+    if (suffix == "RII") return("I")
+    if (suffix == "RIJ") return("Jockey")
+    if (suffix == "RIT") return("RTE")
+    if (suffix == "RIR") return("R2")
+    if (suffix == "RIX") return("Unknown")
+  }
+
+  suffix
+}
+
+# ------------------------------------------------------------
+# Earl Grey attributes: extract NAME= (family fallback only)
+# ------------------------------------------------------------
+get_attr_value <- function(attr, key) {
+  m <- str_match(attr, paste0("(^|;)", key, "=([^;]+)"))
+  ifelse(is.na(m[,3]), NA_character_, m[,3])
+}
+
+# ------------------------------------------------------------
+# Split type string into prefix/suffix
+# ------------------------------------------------------------
+split_type_string <- function(type_vec) {
+  tibble(
+    eg_prefix = if_else(str_detect(type_vec, "/"),
+                        str_extract(type_vec, "^[^/]+"),
+                        type_vec),
+    eg_suffix = if_else(str_detect(type_vec, "/"),
+                        str_extract(type_vec, "(?<=/).*"),
+                        NA_character_)
+  )
+}
+
+# ------------------------------------------------------------
+# suffix -> superfamily/family
+#   - Keep I-Jockey intact
+#   - Earl Grey special-case: CMC-Transib -> sf=Transib, fam=CMC
+#   - EDTA: allow "-" split into sf/family (Gypsy-FamX)
+#   - Earl Grey: do NOT split hyphens (hAT-hATm etc.)
+# ------------------------------------------------------------
+
+infer_sf_fam <- function(suffix, allow_family_split = TRUE) {
+  if (is.na(suffix) || suffix == "") return(list(sf = NA_character_, fam = NA_character_))
+
+  # I-Jockey kept intact
+  if (str_detect(suffix, regex("^I[-_]?Jockey$", ignore_case = TRUE))) {
+    return(list(sf = "I-Jockey", fam = NA_character_))
+  }
+
+  # Earl Grey explicit: CMC-Transib -> family CMC, superfamily Transib
+  if (str_detect(suffix, regex("^CMC-Transib$", ignore_case = TRUE))) {
+    return(list(sf = "Transib", fam = "CMC"))
+  }
+
+  # ------------------------------------------------------------
+  # NEW: targeted splits where "-" indicates FAMILY, not part of the superfamily label
+  # (Does NOT affect Bel-Pao because it doesn't match these prefixes.)
+  # Examples:
+  #   TcMar-Pogo -> sf_raw=TcMar, fam_raw=Pogo   -> canonicalise => sf=Tc1-Mariner, fam=Pogo
+  #   TcMar-Tc1  -> sf_raw=TcMar, fam_raw=Tc1   -> canonicalise => sf=Tc1-Mariner, fam=Tc1
+  #   hAT-Ac     -> sf_raw=hAT,  fam_raw=Ac
+  #   R1-R1A     -> sf_raw=R1,   fam_raw=R1A
+  # ------------------------------------------------------------
+  m_target <- str_match(suffix, regex("^(TcMar|hAT|R1)-(.+)$", ignore_case = TRUE))
+  if (!is.na(m_target[,1])) {
+    sf_left  <- m_target[,2]
+    fam_right <- m_target[,3]
+    # preserve original casing as much as possible for family
+    return(list(sf = sf_left, fam = fam_right))
+  }
+
+  # EDTA-only family split on "-" (generic)
+  if (allow_family_split && str_detect(suffix, "-")) {
+    left  <- str_split_fixed(suffix, "-", 2)[,1]
+    right <- str_split_fixed(suffix, "-", 2)[,2]
+    return(list(sf = left, fam = right))
+  }
+
+  # Default: whole suffix is superfamily
+  list(sf = suffix, fam = NA_character_)
+}
+
+
+infer_sf_fam_vec <- function(suffix_vec, allow_family_split = TRUE) {
+  out <- lapply(suffix_vec, infer_sf_fam, allow_family_split = allow_family_split)
+  tibble(
+    sf_raw  = vapply(out, `[[`, character(1), "sf"),
+    fam_raw = vapply(out, `[[`, character(1), "fam")
+  )
+}
+
+# ------------------------------------------------------------
+# Canonicalise sf/fam (minimal safe normalisations)
+# ------------------------------------------------------------
+canonicalise_sf_fam <- function(prefix, suffix, sf_raw, fam_raw) {
+
+  # LTR/ERV1 -> superfamily ERV, family ERV1
+  if (prefix == "LTR" && !is.na(suffix) && str_detect(suffix, regex("^ERV", TRUE))) {
+    return(list(sf = "ERV", fam = suffix))
+  }
+
+  # TcMar-* -> Tc1-Mariner
+  if (!is.na(sf_raw) && str_detect(sf_raw, regex("^TcMar$|^Tc1$|^TcMar", TRUE))) {
+    return(list(sf = "Tc1-Mariner", fam = fam_raw %||% "Unknown"))
+  }
+
+  # PIF shorthand -> PIF-Harbinger
+  if (!is.na(sf_raw) && str_detect(sf_raw, regex("^PIF$", ignore_case = TRUE))) {
+    return(list(sf = "PIF-Harbinger", fam = fam_raw %||% "Unknown"))
+  }
+
+  # Bel/Pao variants -> Bel-Pao (single LTR superfamily)
+  if (!is.na(sf_raw) && sf_raw %in% c("Bel", "Pao", "Bel-Pao")) {
+    return(list(sf = "Bel-Pao", fam = fam_raw %||% "Unknown"))
+  }
+
+  list(sf = sf_raw, fam = fam_raw)
+}
+
+
+canonicalise_vec <- function(prefix_vec, suffix_vec, sf_raw_vec, fam_raw_vec) {
+  out <- mapply(
+    canonicalise_sf_fam,
+    prefix_vec, suffix_vec, sf_raw_vec, fam_raw_vec,
+    SIMPLIFY = FALSE
+  )
+  tibble(
+    superfamily = vapply(out, `[[`, character(1), "sf"),
+    family      = vapply(out, `[[`, character(1), "fam")
+  )
+}
+
+# ------------------------------------------------------------
+# Infer order from prefix + superfamily (Wicker-safe)
+# ------------------------------------------------------------
+infer_order <- function(prefix, superfamily) {
+  if (prefix == "Unknown") return("Unknown")
+  if (prefix == "LTR") return("LTR")
+  if (prefix %in% c("SINE","SINE?")) return("SINE")
+
+  if (prefix == "LINE") {
+    if (!is.na(superfamily) && str_detect(superfamily, regex("Penelope", TRUE))) return("PLE")
+    return("LINE")
+  }
+
+  if (prefix == "RC") return("Helitron")
+
+  if (prefix == "DNA") {
+    sf <- superfamily %||% "Unknown"
+    if (str_detect(sf, regex("^Helitron$", TRUE))) return("Helitron")
+    if (str_detect(sf, regex("Maverick|Polinton", TRUE))) return("Maverick")
+    if (str_detect(sf, regex("Crypton", TRUE))) return("Crypton")
+    if (str_detect(sf, regex("Tc1-Mariner|hAT|Mutator|MULE|PiggyBac|PIF|Harbinger|CACTA|Transib|Merlin|\\bP\\b", TRUE))) return("TIR")
+    return("Unknown")
+  }
+
+  "Unknown"
+}
+
+# ------------------------------------------------------------
+# prefix -> class (scalar helper)
+# ------------------------------------------------------------
+infer_class_cols <- function(prefix) {
+  if (prefix == "Unknown") return(list(class_broad="Unknown", class_I_II="Unknown"))
+  if (prefix %in% c("LTR","LINE","SINE","SINE?")) return(list(class_broad="Retrotransposon", class_I_II="I"))
+  if (prefix %in% c("DNA","RC")) return(list(class_broad="DNA transposon", class_I_II="II"))
+  list(class_broad="Unknown", class_I_II="Unknown")
+}
+
+# ------------------------------------------------------------
+# order -> class (vectorised)
+# ------------------------------------------------------------
+infer_class_from_order_vec <- function(order_vec) {
+  order_vec <- as.character(order_vec)
+
+  tibble(
+    class_broad_from_order = dplyr::case_when(
+      order_vec %in% c("LTR","LINE","SINE","PLE") ~ "Retrotransposon",
+      order_vec %in% c("TIR","Helitron","Maverick","Crypton") ~ "DNA transposon",
+      TRUE ~ "Unknown"
+    ),
+    class_I_II_from_order = dplyr::case_when(
+      order_vec %in% c("LTR","LINE","SINE","PLE") ~ "I",
+      order_vec %in% c("TIR","Helitron","Maverick","Crypton") ~ "II",
+      TRUE ~ "Unknown"
+    )
+  )
+}
+
+# ------------------------------------------------------------
+# Promote upward: superfamily -> order (only unambiguous); order -> class (always)
+# ------------------------------------------------------------
+promote_from_superfamily <- function(df) {
+  df <- df %>%
+    mutate(
+      order = if_else(str_detect(superfamily, regex("^Helitron$", TRUE)), "Helitron", order)
+    )
+
+  filled <- infer_class_from_order_vec(df$order)
+
+  df %>%
+    mutate(
+      class_broad = if_else(class_broad == "Unknown" & order != "Unknown",
+                            filled$class_broad_from_order, class_broad),
+      class_I_II  = if_else(class_I_II  == "Unknown" & order != "Unknown",
+                            filled$class_I_II_from_order,  class_I_II)
+    )
+}
+
+# ------------------------------------------------------------
+# Resolve clear conflicts: retro-order + DNA/TIR superfamily -> force TIR/Class II
+# ------------------------------------------------------------
+resolve_prefix_sf_conflicts <- function(df) {
+  tir_sf <- regex(
+    "^(Tc1-Mariner|hAT|Mutator|MULE|PIF(-Harbinger)?|Harbinger|PiggyBac|CACTA|Transib|Merlin)$",
+    ignore_case = TRUE
+  )
+
+  df %>%
+    mutate(
+      conflict_resolved = str_detect(superfamily %||% "", tir_sf) & order %in% c("SINE","LINE","LTR","PLE"),
+      class_broad = if_else(conflict_resolved, "DNA transposon", class_broad),
+      class_I_II  = if_else(conflict_resolved, "II", class_I_II),
+      order       = if_else(conflict_resolved, "TIR", order)
+    )
+}
+
+# ------------------------------------------------------------
+# EDTA: final recode pass to remove residual code-like superfamilies
+# ------------------------------------------------------------
+recode_edta_superfamily_codes <- function(df) {
+  if (!"superfamily" %in% names(df)) return(df)
+
+  df %>%
+    mutate(
+      superfamily = case_when(
+        superfamily == "DTA" ~ "hAT",
+        superfamily == "DTC" ~ "CACTA",
+        superfamily == "DTH" ~ "PIF-Harbinger",
+        superfamily == "DTM" ~ "Mutator",
+        superfamily == "DTT" ~ "Tc1-Mariner",
+        superfamily == "RLG" ~ "Gypsy",
+        superfamily == "RLC" ~ "Copia",
+        superfamily == "RLB" ~ "Bel-Pao",
+        superfamily == "RLE" ~ "ERV",
+        superfamily == "RII" ~ "I",
+        superfamily == "RIJ" ~ "Jockey",
+        superfamily == "RIL" ~ "L1",
+        superfamily == "RIR" ~ "R2",
+        superfamily == "DTE" ~ "Merlin",
+        superfamily == "DTR" ~ "Transib",
+        superfamily == "DTP" ~ "P",
+        superfamily == "DTB" ~ "PiggyBac",
+        superfamily == "RLR" ~ "Retrovirus",
+        superfamily == "DHH" ~ "Helitron",
+        superfamily == "DMM" ~ "Maverick",
+        superfamily == "RIT" ~ "RTE",
+        TRUE ~ superfamily
+      )
+    )
+}
+
+# ------------------------------------------------------------
+# Invariant: if superfamily is known, order + class must be known
+# ------------------------------------------------------------
+assert_sf_implies_order_class <- function(df) {
+  viol <- df %>%
+    filter(superfamily != "Unknown" &
+             (order == "Unknown" | class_I_II == "Unknown" | class_broad == "Unknown"))
+
+  if (nrow(viol) > 0) {
+    top <- viol %>%
+      count(type_raw, eg_prefix, eg_suffix, superfamily, order, class_I_II, sort = TRUE) %>%
+      head(15)
+
+    stop(
+      paste0(
+        "Invariant violated: superfamily is known but order/class is Unknown for ",
+        nrow(viol), " rows.\n\n",
+        "Top offending labels:\n",
+        paste(capture.output(print(top, n = 15)), collapse = "\n")
+      ),
+      call. = FALSE
+    )
+  }
+
+  df
+}
+
+# ------------------------------------------------------------
+# MAIN STANDARDISER
+# ------------------------------------------------------------
+standardise_multi_level_type <- function(df, type_col, type_source_label, attr_col = NULL) {
+
+  raw_in  <- as.character(df[[type_col]])
+  type_raw <- raw_in
+
+  # EDTA flags
+  is_MITE    <- rep(FALSE, length(type_raw))
+  is_DNAnona <- rep(FALSE, length(type_raw))
+  if (type_source_label == "EDTA:classification") {
+    is_MITE    <- str_detect(type_raw, regex("\\bMITE\\b", TRUE))
+    is_DNAnona <- str_detect(type_raw, regex("DNAnona", TRUE))
+  }
+
+  # EDTA normalisation of raw labels
+  if (type_source_label == "EDTA:classification") {
+    type_raw <- normalize_edta_line_labels(type_raw)
+    type_raw <- map_edta_code_alone_to_type(type_raw)
+  }
+
+  ps <- split_type_string(type_raw)
+  df <- bind_cols(
+    df,
+    tibble(
+      type_raw    = type_raw,
+      type_source = type_source_label,
+      is_MITE     = is_MITE,
+      is_DNAnona  = is_DNAnona
+    ),
+    ps
+  )
+
+  # EDTA suffix decoding
+  if (type_source_label == "EDTA:classification") {
+    df$eg_suffix <- mapply(decode_edta_suffix_code, df$eg_prefix, df$eg_suffix, USE.NAMES = FALSE)
+  }
+  
+  
+
+  # Infer sf/fam (EDTA allows '-' family split; Earl Grey does not)
+  allow_family_split <- (type_source_label == "EDTA:classification")
+  sf_fam0 <- infer_sf_fam_vec(df$eg_suffix, allow_family_split = allow_family_split)
+  df <- bind_cols(df, sf_fam0)
+
+  # Canonicalise sf/fam
+  sf_fam1 <- canonicalise_vec(df$eg_prefix, df$eg_suffix, df$sf_raw, df$fam_raw)
+  df <- bind_cols(df, sf_fam1)
+
+  # Family fallback (Earl Grey)
+  if (!is.null(attr_col) && attr_col %in% names(df)) {
+    fam_attr <- get_attr_value(df[[attr_col]], "NAME")
+    df <- df %>% mutate(family = coalesce(family, fam_attr))
+  }
+
+  df2 <- df %>%
+    mutate(
+      superfamily = if_else(is.na(superfamily) | superfamily == "", "Unknown", superfamily),
+      family      = if_else(is.na(family)      | family == "",      "Unknown", family)
+    ) %>%
+    rowwise() %>%
+    mutate(
+      class_broad = infer_class_cols(eg_prefix)$class_broad,
+      class_I_II  = infer_class_cols(eg_prefix)$class_I_II,
+      order       = infer_order(eg_prefix, superfamily),
+      reclassified = (eg_prefix == "LINE" & order == "PLE")
+    ) %>%
+    ungroup() %>%
+    select(-sf_raw, -fam_raw)
+
+  # EDTA bins: DNAnona + MITE as flags
+  if (type_source_label == "EDTA:classification") {
+
+    dn_keep_helitron <- df2$is_DNAnona &
+      str_detect(df2$superfamily %||% "", regex("^Helitron$", ignore_case = TRUE))
+
+    df2 <- df2 %>%
+      mutate(
+        # DNAnona: always Class II DNA
+        class_broad = if_else(is_DNAnona, "DNA transposon", class_broad),
+        class_I_II  = if_else(is_DNAnona, "II", class_I_II),
+
+        # Preserve Helitron if explicitly indicated; otherwise keep ranks Unknown
+        order = case_when(
+          dn_keep_helitron ~ "Helitron",
+          is_DNAnona ~ "Unknown",
+          TRUE ~ order
+        ),
+        superfamily = case_when(
+          dn_keep_helitron ~ "Helitron",
+          is_DNAnona ~ "Unknown",
+          TRUE ~ superfamily
+        ),
+        family = case_when(
+          dn_keep_helitron ~ family,
+          is_DNAnona ~ "Unknown",
+          TRUE ~ family
+        ),
+
+        # MITE: force into TIR, keep informative sf
+        class_broad = if_else(is_MITE, "DNA transposon", class_broad),
+        class_I_II  = if_else(is_MITE, "II", class_I_II),
+        order       = if_else(is_MITE, "TIR", order)
+      )
+  }
+
+
+  # Normalise Unknown (early)
+  df2 <- normalise_unknowns(df2)
+
+  # Conflict resolution + promotion
+  df2 <- resolve_prefix_sf_conflicts(df2)
+  df2 <- promote_from_superfamily(df2)
+
+  # EDTA: final recode pass for residual codes
+  if (type_source_label == "EDTA:classification") {
+    df2 <- recode_edta_superfamily_codes(df2)
+  }
+
+  # Final Unknown normalisation (locks it)
+  df2 <- normalise_unknowns(df2)
+
+  # Invariant
+  assert_sf_implies_order_class(df2)
+}
+
+# ============================================================
+# APPLY
+# ============================================================
+
+droso_earlG_std <- standardise_multi_level_type(
+  droso_earlG_TEonly,
+  type_col = "type",
+  type_source_label = "EarlGrey:type",
+  attr_col = "attributes"
+)
+
+droso_edta_std <- standardise_multi_level_type(
+  droso_edta_TEonly,
+  type_col = "classification",
+  type_source_label = "EDTA:classification",
+  attr_col = NULL
+)
+
+# ============================================================
+# SANITY CHECKS
+# ============================================================
+
+# A) Every unknown-like token must be exactly "Unknown" (case + whitespace)
+stopifnot(
+  !any(str_to_lower(str_trim(droso_edta_std$superfamily)) == "unknown" & str_trim(droso_edta_std$superfamily) != "Unknown"),
+  !any(str_to_lower(str_trim(droso_earlG_std$superfamily)) == "unknown" & str_trim(droso_earlG_std$superfamily) != "Unknown")
+)
+
+# B) Earl Grey: CMC-Transib mapping exactly as requested
+cmc <- droso_earlG_std %>% filter(str_detect(type_raw, regex("^DNA/CMC-Transib$", TRUE)))
+stopifnot(nrow(cmc) > 0)
+stopifnot(all(cmc$order == "TIR" & cmc$superfamily == "Transib" & cmc$family == "CMC" & cmc$class_I_II == "II"))
+
+# C) EDTA: no residual codes as superfamily
+stopifnot(!any(droso_edta_std$superfamily %in% c("DTA","DTC","DTH","DTM","DTT")))
+
+# D) Invariant proof (should be 0)
+stopifnot(
+  droso_earlG_std %>%
+    filter(superfamily != "Unknown" & (order == "Unknown" | class_I_II == "Unknown" | class_broad == "Unknown")) %>%
+    nrow() == 0,
+  droso_edta_std %>%
+    filter(superfamily != "Unknown" & (order == "Unknown" | class_I_II == "Unknown" | class_broad == "Unknown")) %>%
+    nrow() == 0
+)
+
+# Optional: inspect
+# table(droso_earlG_std$superfamily)
+# table(droso_edta_std$superfamily)
+
+```
+
+```{r}
+# Optional: inspect
+table(droso_earlG_std$superfamily)
+table(droso_edta_std$superfamily)
+
+```
+
+```{r}
+table(droso_edta_std$order)
+```
+
+
+```{r}
+droso_earlG_std$seqnames <- droso_earlG_std$seqid
+```
+
+```{r}
+# expamnding EG ID column
+library(dplyr)
+library(tidyr)
+
+droso_earlG2 <- droso_earlG_std %>%
+  mutate(.row_id = row_number()) %>%
+  separate_rows(attributes, sep = ";") %>%
+  separate(attributes, into = c("key", "value"), sep = "=", fill = "right", extra = "merge") %>%
+  pivot_wider(names_from = key, values_from = value) %>%
+  mutate(
+    TSTART   = suppressWarnings(as.integer(TSTART)),
+    TEND     = suppressWarnings(as.integer(TEND)),
+    KIMURA80 = suppressWarnings(as.numeric(KIMURA80)),
+    SHORTTE  = case_when(
+      SHORTTE %in% c("T", "TRUE", "True", "true") ~ TRUE,
+      SHORTTE %in% c("F", "FALSE", "False", "false") ~ FALSE,
+      TRUE ~ NA
+    )
+  ) %>%
+  select(-.row_id)
+
+```
+
+```{r}
+droso_earlG_std <- droso_earlG2
+head(droso_earlG_std)
+```
+
+```{r}
+droso_earlG_std$class <- droso_earlG_std$class_broad
+droso_edta_std$class <- droso_edta_std$class_broad
+```
+
+
+```{r}
+write.csv(
+  droso_edta_std,
+  file = "droso_edta_standardised.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  droso_earlG_std,
+  file = "droso_earlG_standardised.csv",
+  row.names = FALSE
+)
+```
+
+```{r}
+head(droso_earlG_std)
+```
+
+```{r}
+table(droso_earlG_std$superfamily)
+```
+
+```{r}
+table(droso_edta_std$superfamily)
+```
+
