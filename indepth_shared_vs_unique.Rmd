@@ -1,17 +1,8 @@
----
-title: "indepth_anlyis_shared_vs_unique"
-author: "Banguket Nina(2366065)"
-date: "2026-01-17"
-output: html_document
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
 
 ```{r}
-setwd("~/Desktop/Thesis/final_analysis")
+# In-depth analysis of share vs unique TE superfamilies between both flatworm species
 ```
+
 
 ```{r}
 library(dplyr)
@@ -313,12 +304,6 @@ write.csv(
 ```
 
 
-# Comparison of shared vs unique TE families
-1. Do shared or species-specific TE lineages dominate the TE signal in each species?
-2. Is the dominance pattern the same for bp and for annotation counts?
-3. Are between-species differences driven by shared or unique lineages?
-4. Are species-specific superfamilies globally important or marginal?
-
 ```{r}
 # Step 3 totals: all TEs but exclude Unknown superfamily (consistent with sf_presence_tbl)
 species_totals_step3 <- comp_tbl %>%
@@ -400,4 +385,4 @@ ggplot(step3_tbl,
 
 ```
 
-## Since unique TEs constitute a higher percentage of the overall genome we look further into the shared ones ot answer: How does the same TE repertoire behave differently under different regulatory regimes (parasitic vs free-living)?
+## Since unique TEs constitute a higher percentage of the overall genome we look further into the shared ones to answer: How does the same TE repertoire behave differently under different regulatory regimes (parasitic vs free-living)?
